@@ -18,10 +18,10 @@ Droi-game-tool is part of the Droi AI creator workflow. It helps game makers tur
 
 - **Map Studio**: upload map tiles or full map images, stitch maps, preview the canvas, place obstacles, and edit collision cells.
 - **Obstacle Editor**: upload single images or a full folder of obstacle assets into the sidebar; remove assets and automatically clear placed instances and collision data.
-- **AI Matte**: remove backgrounds with Gemini by default, while reusing images that already contain transparency.
+- **AI Matte**: remove backgrounds through the configured AI backend, while reusing images that already contain transparency.
 - **Character Action Studio**: analyze a character image and build a starter action set for `idle / walk / run / attack / skill / hurt / death`.
 - **Progressive Generation**: generate action candidates in batches, persist every successful frame immediately, and keep ready images available while later frames continue.
-- **Provider Fallback**: use Gemini first and Qwen/DashScope as fallback, with all API keys read from local environment variables only.
+- **Provider Routing**: switch between multiple AI backends behind the API, with all provider credentials read from local environment variables only.
 
 ## AI Workflow
 
@@ -71,22 +71,14 @@ Open `http://127.0.0.1:5173/`.
 
 Create `.env.local` in the repository root, or set the variables in your local shell. Never commit real API keys.
 
-Recommended names:
-
-- `GEMINI_API_KEY`
-- `DASHSCOPE_API_KEY`
-
-Compatible aliases:
-
-- `GOOGLE_API_KEY`
-- `QWEN_API_KEY`
+Set the provider-specific AI keys required by your local backend configuration. Keep them in `.env.local` or your shell environment only.
 
 ## Main API
 
 | Method | Path | Purpose |
 | --- | --- | --- |
 | `GET` | `/health` | Backend health check |
-| `POST` | `/matte` | AI background removal, preferring Gemini with local fallback |
+| `POST` | `/matte` | AI background removal through the configured backend |
 | `POST` | `/character-action/analyze` | Create a character action analysis and generation job |
 | `GET` | `/character-action/analyze/{job_id}` | Poll job status, including partial candidates while processing |
 | `GET` | `/character-action/analyze/{job_id}/result` | Read the completed action result |
@@ -116,6 +108,5 @@ Before publishing, run a secret scan and confirm that `.env.local`, `backend/out
 | --- | --- |
 | `frontend/` | React frontend app |
 | `backend/app/main.py` | FastAPI app and job endpoints |
-| `backend/app/gemini_provider.py` | Gemini image and action generation |
-| `backend/app/qwen_provider.py` | Qwen fallback provider |
+| `backend/app/*_provider.py` | AI provider integrations |
 | `backend/outputs/` | Local generated outputs, ignored by Git |

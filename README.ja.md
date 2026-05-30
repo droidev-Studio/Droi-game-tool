@@ -18,7 +18,7 @@ From concept to full game, in minutes, not weeks.
 
 - Map Studio
 - Obstacle Editor
-- AI Matte with Gemini and Qwen fallback
+- AI Matte through configurable AI backends
 - Character Action Studio
 - Progressive action candidate generation
 

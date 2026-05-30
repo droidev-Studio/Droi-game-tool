@@ -18,10 +18,10 @@ This entire bullet-hell game was generated end-to-end by Droi AI, complete with 
 
 - **Map Studio**：上传地图切片或完整地图图像，拼接地图、预览画布、放置阻挡物并编辑碰撞格。
 - **Obstacle Editor**：上传单张图片或整个文件夹的阻挡物素材，删除素材时同步清理已放置实例和碰撞数据。
-- **AI Matte**：默认使用 Gemini 自动去背，并在图片已经带透明背景时直接复用原图。
+- **AI Matte**：通过当前配置的 AI 后端自动去背，并在图片已经带透明背景时直接复用原图。
 - **Character Action Studio**：分析人物图片，生成 `idle / walk / run / attack / skill / hurt / death` 的基础动作任务。
 - **Progressive Generation**：动作候选图按批推进，每成功一张就立即固定在候选栏，用户可以边生成边拖拽使用。
-- **Provider Fallback**：默认使用 Gemini，失败时可回退到 Qwen/DashScope，API Key 只从本地环境变量读取。
+- **Provider Routing**：后端可切换多个 AI provider，所有 provider 凭证只从本地环境变量读取。
 
 ## 本地开发
 
