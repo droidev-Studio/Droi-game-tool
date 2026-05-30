@@ -1,0 +1,18 @@
+# 云原生构建配置 - pixelwork 前端
+# 文档: https://docs.cnb.cool/build/quick-start.html
+# 部署到 EdgeOne Pages: https://edgeone.ai/zh/document/using-cnb-plugin
+# Token 从 CNB 密钥仓库读取，便于安全推送到 GitHub
+
+main:
+  push:
+    - name: "pixelwork 构建并部署"
+      docker:
+        image: node:20
+      imports: https://cnb.cool/RoninCatTeam/eo-token/-/blob/main/envs.yml
+      stages:
+        - name: 安装依赖
+          script: cd frontend && npm ci
+        - name: 构建前端
+          script: cd frontend && npm run build
+        - name: 部署到 EdgeOne Pages
+          script: npx edgeone pages deploy frontend/dist -n ronin-pixeltools -t $EDGEONE_API_TOKEN
