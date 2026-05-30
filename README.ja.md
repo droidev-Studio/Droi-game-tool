@@ -2,20 +2,20 @@
 
 [English](README.md) | [Japanese](README.ja.md) | [Chinese](README.zh.md)
 
-Droi-game-tool is the game art production toolkit in the Droi AI ecosystem. It brings map composition, background removal, and character action sprite generation into one workflow.
+Droi-game-tool は、Droi AI エコシステム向けのゲームアート制作ツールです。マップ構成、背景除去、キャラクターアクション素材生成を 1 つのワークフローにまとめます。
 
 ## Droi AI
 
-Built in 5 Minutes with Droi AI.
+Droi AI なら 5 分で構築。
 
-From concept to full game, in minutes, not weeks.
+コンセプトから完成したゲームまで、数週間ではなく数分で。
 
 - [Project repository: Droi-AI-landing](https://github.com/droidev-Studio/Droi-AI-landing)
 
-## Main Features
+## 主な機能
 
 - Map Studio
 - Obstacle Editor
-- AI Matte through configurable AI backends
+- 設定された AI バックエンドによる AI Matte
 - Character Action Studio
-- Progressive action candidate generation
+- 段階的なアクション候補生成
