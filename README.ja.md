@@ -1,8 +1,8 @@
 # Droi-game-tool
 
-Droi-game-tool は、Droi AI エコシステム向けのゲームアート制作ツールです。マップ制作、背景除去、キャラクターアクション素材生成を 1 つのワークフローにまとめます。
+[English](README.md) | [&#26085;&#26412;&#35486;](README.ja.md) | [&#20013;&#25991;](README.zh.md)
 
-English README: [README.md](README.md)
+Droi-game-tool is the game art production toolkit in the Droi AI ecosystem. It brings map composition, background removal, and character action sprite generation into one workflow.
 
 ## Droi AI
 

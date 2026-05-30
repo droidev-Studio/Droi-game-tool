@@ -2,7 +2,7 @@
 
 **AI game art production toolkit for maps, matting, and character action sprites.**
 
-[English](README.md) | [日本語](README.ja.md)
+[English](README.md) | [&#26085;&#26412;&#35486;](README.ja.md) | [&#20013;&#25991;](README.zh.md)
 
 ![React](https://img.shields.io/badge/React-19-61dafb?style=flat-square)
 ![FastAPI](https://img.shields.io/badge/FastAPI-backend-009688?style=flat-square)
