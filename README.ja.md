@@ -10,8 +10,6 @@ Built in 5 Minutes with Droi AI.
 
 From concept to full game, in minutes, not weeks.
 
-- [Droi AI GitHub](https://github.com/droidev-Studio)
-- [Droi AI live experience](https://droidev-studio.github.io)
 - [Project repository: Droi-AI-landing](https://github.com/droidev-Studio/Droi-AI-landing)
 
 ## Main Features

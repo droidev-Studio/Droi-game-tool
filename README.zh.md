@@ -8,8 +8,6 @@ Droi-game-tool 是 Droi AI 生态下的游戏美术与动作资产生产工具�
 
 From concept to full game, in minutes, not weeks.
 
-- [Droi AI GitHub](https://github.com/droidev-Studio)
-- [Experience the future of game development](https://droidev-studio.github.io)
 - [Project repository: Droi-AI-landing](https://github.com/droidev-Studio/Droi-AI-landing)
 
 This entire bullet-hell game was generated end-to-end by Droi AI, complete with ECS architecture, boss patterns, particle effects, and a neon cyberpunk aesthetic.
