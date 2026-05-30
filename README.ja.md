@@ -1,6 +1,6 @@
 # Droi-game-tool
 
-[English](README.md) | [&#26085;&#26412;&#35486;](README.ja.md) | [&#20013;&#25991;](README.zh.md)
+[English](README.md) | [Japanese](README.ja.md) | [Chinese](README.zh.md)
 
 Droi-game-tool is the game art production toolkit in the Droi AI ecosystem. It brings map composition, background removal, and character action sprite generation into one workflow.
 

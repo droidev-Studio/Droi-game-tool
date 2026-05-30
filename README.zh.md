@@ -1,6 +1,6 @@
 # Droi-game-tool
 
-[English](README.md) | [&#26085;&#26412;&#35486;](README.ja.md) | [&#20013;&#25991;](README.zh.md)
+[English](README.md) | [Japanese](README.ja.md) | [Chinese](README.zh.md)
 
 Droi-game-tool 是 Droi AI 生态下的游戏美术与动作资产生产工具。它把地图拼接、阻挡物编辑、AI 去背、人物动作分析和动作候选图生成放进同一个工作流，帮助创作者更快把粗略素材整理成可用于游戏制作的资产。
 

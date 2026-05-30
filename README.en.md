@@ -2,12 +2,7 @@
 
 **AI game art production toolkit for maps, matting, and character action sprites.**
 
-[English](README.md) | [&#26085;&#26412;&#35486;](README.ja.md) | [&#20013;&#25991;](README.zh.md)
-
-![React](https://img.shields.io/badge/React-19-61dafb?style=flat-square)
-![FastAPI](https://img.shields.io/badge/FastAPI-backend-009688?style=flat-square)
-![Gemini](https://img.shields.io/badge/Gemini-default%20AI-4285f4?style=flat-square)
-![Qwen](https://img.shields.io/badge/Qwen-fallback%20AI-6f42c1?style=flat-square)
+[English](README.md) | [Japanese](README.ja.md) | [Chinese](README.zh.md)
 
 ## Built in 5 Minutes with Droi AI
 
