@@ -1,88 +1,103 @@
 # Droi-game-tool
 
-[中文](README.md) | [English](README.en.md) | [日本語](README.ja.md)
+**AI game art production toolkit for maps, matting, and character action sprites.**
 
-Droi-game-tool 是一个独立的游戏美术生产工具，面向小型游戏、RPG、像素角色和地图资产制作流程。它把地图拼接、阻挡物编辑、AI 去背、人物动作分析与动作候选图生成放在同一个工作台里，默认界面语言为英文，并在首页右上角提供语言切换。
+[English](README.md) | [日本語](README.ja.md)
 
-## 核心功能
+![React](https://img.shields.io/badge/React-19-61dafb?style=flat-square)
+![FastAPI](https://img.shields.io/badge/FastAPI-backend-009688?style=flat-square)
+![Gemini](https://img.shields.io/badge/Gemini-default%20AI-4285f4?style=flat-square)
+![Qwen](https://img.shields.io/badge/Qwen-fallback%20AI-6f42c1?style=flat-square)
 
-- **Map Studio**：上传地图切片或地图图片，进行地图拼接、画布预览、阻挡物放置与碰撞格编辑。
-- **Obstacle Editor**：支持上传单张图片或整个文件夹，把障碍物素材加入侧边栏；可删除素材，并同步清理已放置实例和碰撞数据。
-- **AI Matte**：默认调用 Gemini 做自动抠图去背；处理前会检测图片是否已经带透明背景，已透明的图片会直接沿用原图。
-- **Character Action Studio**：分析人物动作，生成 `idle / walk / run / attack / skill / hurt / death` 的基础动作候选图。
-- **Progressive Generation**：动作图默认按每批 3 张推进，成功 1 张就写入任务结果并固定显示在底部候选栏，用户可以边生成边拖拽已完成图片。
-- **Provider Fallback**：AI 能力默认优先 Gemini，失败时可回退到 Qwen，两个 provider 都使用环境变量读取 API Key。
+## Built in 5 Minutes with Droi AI
 
-## 技术栈
+From concept to full game, in minutes, not weeks.
 
-- Frontend：React 19、Vite、TypeScript、Ant Design
-- Backend：FastAPI、Pillow、rembg、Gemini API、Qwen/DashScope API
-- Runtime：Python 3.11+、Node.js 18+
+[Droi AI GitHub](https://github.com/droidev-Studio) | [Experience the future of game development](https://droidev-studio.github.io) | [Project repository: Droi-AI-landing](https://github.com/droidev-Studio/Droi-AI-landing)
 
-## 本地开发
+This entire bullet-hell game was generated end-to-end by Droi AI, complete with ECS architecture, boss patterns, particle effects, and a neon cyberpunk aesthetic.
 
-### 1. 安装依赖
+Droi-game-tool is part of the Droi AI creator workflow. It helps game makers turn rough art inputs into production-ready map layouts, transparent cutouts, and character action sprite candidates.
+
+## What It Does
+
+- **Map Studio**: upload map tiles or full map images, stitch maps, preview the canvas, place obstacles, and edit collision cells.
+- **Obstacle Editor**: upload single images or a full folder of obstacle assets into the sidebar; remove assets and automatically clear placed instances and collision data.
+- **AI Matte**: remove backgrounds with Gemini by default, while reusing images that already contain transparency.
+- **Character Action Studio**: analyze a character image and build a starter action set for `idle / walk / run / attack / skill / hurt / death`.
+- **Progressive Generation**: generate action candidates in batches, persist every successful frame immediately, and keep ready images available while later frames continue.
+- **Provider Fallback**: use Gemini first and Qwen/DashScope as fallback, with all API keys read from local environment variables only.
+
+## AI Workflow
+
+Droi-game-tool focuses on the practical asset steps that sit between idea generation and a playable game:
+
+1. Prepare or stitch the map.
+2. Add obstacle assets and collision data.
+3. Remove backgrounds from character or prop art.
+4. Analyze a character and generate a basic action task set.
+5. Drag ready candidates into action slots while generation continues.
+
+The backend exposes partial character-action job results during processing, so the frontend can show successful candidates immediately instead of waiting for the full batch to finish.
+
+## Local Development
+
+Requirements:
+
+- Python 3.11+
+- Node.js 18+
+
+Install dependencies:
 
 ```powershell
-# 后端
 py -m pip install -r backend/requirements.txt
 
-# 前端
 cd frontend
 npm install
 ```
 
-### 2. 配置 AI Key
-
-在本地根目录创建 `.env.local`，或者在终端里设置环境变量。不要把真实 Key 提交到 GitHub。
-
-推荐变量名：
-
-- `GEMINI_API_KEY`：Gemini
-- `DASHSCOPE_API_KEY`：Qwen / DashScope
-
-兼容变量名：
-
-- `GOOGLE_API_KEY`：Gemini
-- `QWEN_API_KEY`：Qwen
-
-### 3. 启动后端
+Start the backend:
 
 ```powershell
 $env:PYTHONPATH = (Get-Location).Path
 py -m uvicorn backend.app.main:app --reload --port 8000
 ```
 
-### 4. 启动前端
+Start the frontend:
 
 ```powershell
 cd frontend
 npm run dev
 ```
 
-访问 `http://127.0.0.1:5173/`。
+Open `http://127.0.0.1:5173/`.
 
-## 主要接口
+## Environment Variables
 
-| 方法 | 路径 | 说明 |
+Create `.env.local` in the repository root, or set the variables in your local shell. Never commit real API keys.
+
+Recommended names:
+
+- `GEMINI_API_KEY`
+- `DASHSCOPE_API_KEY`
+
+Compatible aliases:
+
+- `GOOGLE_API_KEY`
+- `QWEN_API_KEY`
+
+## Main API
+
+| Method | Path | Purpose |
 | --- | --- | --- |
-| `GET` | `/health` | 后端健康检查 |
-| `POST` | `/matte` | AI 去背，优先 Gemini，失败时可回退本地 rembg |
-| `POST` | `/character-action/analyze` | 创建人物动作分析与候选图生成任务 |
-| `GET` | `/character-action/analyze/{job_id}` | 查询任务状态；处理中也返回 partial candidates |
-| `GET` | `/character-action/analyze/{job_id}/result` | 获取完成后的动作生成结果 |
-| `GET` | `/character-action/analyze/{job_id}/assets/{filename}` | 读取生成的候选图资源 |
+| `GET` | `/health` | Backend health check |
+| `POST` | `/matte` | AI background removal, preferring Gemini with local fallback |
+| `POST` | `/character-action/analyze` | Create a character action analysis and generation job |
+| `GET` | `/character-action/analyze/{job_id}` | Poll job status, including partial candidates while processing |
+| `GET` | `/character-action/analyze/{job_id}/result` | Read the completed action result |
+| `GET` | `/character-action/analyze/{job_id}/assets/{filename}` | Read generated candidate image assets |
 
-仓库里仍保留部分历史视频任务接口，当前 Droi-game-tool 的主流程以上面的地图、去背和人物动作能力为准。
-
-## 安全与提交规则
-
-- `.env.local` 只用于本地 API Key，不要提交。
-- `backend/outputs/` 是生成结果目录，不要提交。
-- `.codex-runlogs/` 和本地日志文件不属于产品代码，不要提交。
-- 提交前建议执行密钥扫描，确保没有 Gemini Key、Qwen Key 或 Bearer Token 泄露。
-
-## 验证
+## Validation
 
 ```powershell
 cd frontend
@@ -92,12 +107,20 @@ cd ..
 py -m py_compile backend\app\main.py backend\app\gemini_provider.py backend\app\qwen_provider.py
 ```
 
-## 目录说明
+Before publishing, run a secret scan and confirm that `.env.local`, `backend/outputs/`, local logs, and generated assets are not included.
 
-| 路径 | 说明 |
+## Related Droi AI Projects
+
+- [Droi AI GitHub](https://github.com/droidev-Studio)
+- [Droi AI live experience](https://droidev-studio.github.io)
+- [Droi-AI-landing](https://github.com/droidev-Studio/Droi-AI-landing)
+
+## Project Layout
+
+| Path | Description |
 | --- | --- |
-| `frontend/` | React 前端应用 |
-| `backend/app/main.py` | FastAPI 入口与任务接口 |
-| `backend/app/gemini_provider.py` | Gemini 图像与动作生成能力 |
-| `backend/app/qwen_provider.py` | Qwen fallback 能力 |
-| `backend/outputs/` | 本地生成结果，已忽略提交 |
+| `frontend/` | React frontend app |
+| `backend/app/main.py` | FastAPI app and job endpoints |
+| `backend/app/gemini_provider.py` | Gemini image and action generation |
+| `backend/app/qwen_provider.py` | Qwen fallback provider |
+| `backend/outputs/` | Local generated outputs, ignored by Git |
