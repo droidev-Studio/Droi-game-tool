@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent as Re
 import {
   BgColorsOutlined,
   BorderOutlined,
+  CheckOutlined,
   CopyOutlined,
   DeleteOutlined,
   DownloadOutlined,
@@ -11,11 +12,13 @@ import {
   PlusOutlined,
   UploadOutlined,
 } from '@ant-design/icons'
-import { App, Button, Segmented, Select, Slider, Space, Switch, Typography } from 'antd'
-import { removeBackground } from '../../api'
+import { App, Button, Select, Slider, Space, Switch, Typography } from 'antd'
 import { useLanguage } from '../../i18n/context'
+import { DROI_GAME_TOOL_PROTOCOL, postToolHostMessage, type GameProjectContext } from '../../tools/toolHostBridge'
+import { removeBackgroundIfNeeded } from '../../lib/media-tools/matteClient'
 import {
   cellKey,
+  collisionCellKey,
   cellsFromRect,
   makeCollisionCell,
   makeId,
@@ -25,6 +28,7 @@ import {
   snapCellFromPixel,
   upsertManualCell,
   type CollisionCell,
+  type CollisionBlockMode,
   type CollisionTool,
   type LoadedImage,
   type ObstacleAsset,
@@ -32,9 +36,11 @@ import {
   type ObstacleInstance,
 } from './obstacleModel'
 import {
+  blobToDataUrl,
   buildObstacleJson,
   canvasToBlob,
   downloadBlob,
+  imageBlobToZip,
   loadImageFile,
   renderMapWithObstacles,
 } from './obstacleExport'
@@ -45,9 +51,54 @@ const MIN_ZOOM = 0.08
 const MAX_ZOOM = 6
 const MIN_OBSTACLE_SIZE = 4
 const MAX_OBSTACLE_SCALE_PERCENT = 400
+const RANDOM_OBSTACLE_DENSITY = 0.035
+const RANDOM_OBSTACLE_MAX_COUNT = 80
+const RANDOM_OBSTACLE_ATTEMPTS = 30
+
+function droiTargetMetadata(projectContext: GameProjectContext | null | undefined, operation: string) {
+  const selectedTarget = projectContext?.selectedTarget
+  return {
+    targetItemId: selectedTarget?.itemId,
+    targetAssetPath: selectedTarget?.assetPath,
+    expectedArtifactType: selectedTarget?.expectedArtifactType,
+    operation,
+    sourceTool: 'Droi-Game-Tool',
+  }
+}
+const RANDOM_OBSTACLE_MIN_SCALE = 0.4
+const RANDOM_OBSTACLE_MAX_SCALE = 1
+const RANDOM_OBSTACLE_MAX_SHORT_SIDE_RATIO = 0.18
 
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value))
+}
+
+function fitAssetToMap(asset: ObstacleAsset, mapImage: LoadedImage): { width: number; height: number; scale: number } {
+  const width = Math.max(MIN_OBSTACLE_SIZE, Math.round(asset.width))
+  const height = Math.max(MIN_OBSTACLE_SIZE, Math.round(asset.height))
+  const scale = Math.min(1, mapImage.width / width, mapImage.height / height)
+  if (scale >= 1) return { width, height, scale: 1 }
+  return {
+    width: Math.max(MIN_OBSTACLE_SIZE, Math.round(width * scale)),
+    height: Math.max(MIN_OBSTACLE_SIZE, Math.round(height * scale)),
+    scale,
+  }
+}
+
+function rectsOverlap(
+  left: { x: number; y: number; width: number; height: number },
+  right: { x: number; y: number; width: number; height: number },
+): boolean {
+  return (
+    left.x < right.x + right.width
+    && left.x + left.width > right.x
+    && left.y < right.y + right.height
+    && left.y + left.height > right.y
+  )
+}
+
+function randomBetween(min: number, max: number): number {
+  return min + Math.random() * (max - min)
 }
 
 const obstacleCopy = {
@@ -56,8 +107,8 @@ const obstacleCopy = {
     statusFailed: 'Matte failed, using original',
     statusOriginal: 'Original',
     chooseMap: 'Please choose a map image.',
-    tooLarge: 'Image must be under {size}MB.',
-    skippedLarge: '{name} is over {size}MB and was skipped.',
+    tooLarge: 'AI matte supports images up to {size}MB. Larger images are kept as original.',
+    skippedLarge: '{name} is over {size}MB, skipped AI matte and kept original.',
     matteFailedUseOriginal: '{name} matte failed, using original: {error}',
     assetsAdded: 'Obstacle assets added.',
     originalsAdded: 'Original images added.',
@@ -73,19 +124,32 @@ const obstacleCopy = {
     assetsTitle: 'Obstacle Art',
     autoMatte: 'Auto background removal',
     uploadObstacle: 'Upload Obstacle Images',
+    multiSelect: 'Multi-select',
+    selectedAssets: '{count} assets selected',
+    randomPlace: 'Random Place',
+    randomPlaced: 'Randomly placed {count} obstacles.',
+    selectAssetsFirst: 'Select obstacle assets first.',
     addToCenter: 'Add to Map Center',
     gridLabel: 'Collision Grid',
     gridTitle: 'Collision Grid',
     showGrid: 'Show collision grid',
+    collisionRuleTitle: 'Collision Rule',
+    playerOnlyBoundary: 'Player-only Boundary',
+    playerOnlyBoundaryHint: 'Only the player is blocked by these collision cells.',
+    allEntityObstacle: 'All Entity Obstacles',
+    allEntityObstacleHint: 'All entities are blocked, except enemies tagged ignoreCollisionEnemy.',
     select: 'Select',
-    paint: 'Paint',
-    erase: 'Erase',
+    paint: 'Place',
+    collisionPaint: 'Draw Collision',
+    erase: 'Erase Collision',
     gridCount: '{count} collision cells / {cols} x {rows}',
+    zoomLabel: 'Canvas zoom',
+    sizeLabel: 'Size',
     exportLabel: 'Export',
     exportTitle: 'Export',
     exportJson: 'Export Collision JSON',
-    exportPng: 'Export Map PNG',
-    exportHint: 'PNG saves the visual map. JSON stores gridSize, map dimensions, obstacle transforms, and collisionCells for AI or runtime collision.',
+    exportPng: 'Export Map ZIP',
+    exportHint: 'ZIP contains the visual PNG and manifest. JSON stores gridSize, map dimensions, obstacle transforms, and collisionCells for AI or runtime collision.',
     emptyTitle: 'Upload a map to start editing',
     emptyHint: 'Obstacle images are automatically matted and shown in the left asset library.',
     obstacleAria: 'Obstacle {name}',
@@ -93,14 +157,15 @@ const obstacleCopy = {
     larger: 'Larger',
     duplicate: 'Duplicate',
     delete: 'Delete',
+    clearObstacles: 'Clear Obstacles',
   },
   zh: {
     statusProcessed: '已去背',
     statusFailed: '去背失败，使用原图',
     statusOriginal: '原图',
     chooseMap: '请选择地图图片。',
-    tooLarge: '图片不能超过 {size}MB。',
-    skippedLarge: '{name} 超过 {size}MB，已跳过。',
+    tooLarge: 'AI 去背支持 {size}MB 以内图片，超过后会保留原图。',
+    skippedLarge: '{name} 超过 {size}MB，已跳过 AI 去背并保留原图。',
     matteFailedUseOriginal: '{name} 自动去背失败，已使用原图：{error}',
     assetsAdded: '阻挡物已加入素材组。',
     originalsAdded: '原图已加入素材组。',
@@ -124,11 +189,13 @@ const obstacleCopy = {
     paint: '画碰撞',
     erase: '擦除',
     gridCount: '{count} 个碰撞格 / {cols} x {rows}',
+    zoomLabel: '画布缩放',
+    sizeLabel: '尺寸',
     exportLabel: 'Export',
     exportTitle: '导出',
     exportJson: '导出碰撞 JSON',
-    exportPng: '导出含阻挡物 PNG',
-    exportHint: 'PNG 只保存画面；JSON 会记录 gridSize、地图尺寸、阻挡物坐标与 collisionCells，供 AI 或 runtime 读取。',
+    exportPng: '导出含阻挡物 ZIP',
+    exportHint: 'ZIP 内包含最终 PNG 和 manifest；JSON 会记录 gridSize、地图尺寸、阻挡物坐标与 collisionCells，供 AI 或 runtime 读取。',
     emptyTitle: '上传地图后开始编辑',
     emptyHint: '阻挡物上传后默认自动去背，并展示在左侧素材组里。',
     obstacleAria: '阻挡物 {name}',
@@ -136,14 +203,15 @@ const obstacleCopy = {
     larger: '放大',
     duplicate: '复制',
     delete: '删除',
+    clearObstacles: '清空障碍物',
   },
   ja: {
     statusProcessed: '背景除去済み',
     statusFailed: '除去失敗、元画像を使用',
     statusOriginal: '元画像',
     chooseMap: 'マップ画像を選択してください。',
-    tooLarge: '画像は {size}MB 以下にしてください。',
-    skippedLarge: '{name} は {size}MB を超えたためスキップしました。',
+    tooLarge: 'AI 背景除去は {size}MB 以下に対応します。大きい画像は元画像のまま追加します。',
+    skippedLarge: '{name} は {size}MB を超えたため AI 背景除去をスキップし、元画像のまま追加しました。',
     matteFailedUseOriginal: '{name} の背景除去に失敗したため元画像を使用します: {error}',
     assetsAdded: '障害物素材を追加しました。',
     originalsAdded: '元画像を追加しました。',
@@ -167,11 +235,13 @@ const obstacleCopy = {
     paint: '描画',
     erase: '消去',
     gridCount: '{count} 個 / {cols} x {rows}',
+    zoomLabel: 'キャンバスズーム',
+    sizeLabel: 'サイズ',
     exportLabel: 'Export',
     exportTitle: '出力',
     exportJson: '当たり判定 JSON',
-    exportPng: '障害物入り PNG',
-    exportHint: 'PNG は見た目のみ保存します。JSON は gridSize、マップ寸法、障害物座標、collisionCells を保存します。',
+    exportPng: '障害物入り ZIP',
+    exportHint: 'ZIP には最終 PNG と manifest が含まれます。JSON は gridSize、マップ寸法、障害物座標、collisionCells を保存します。',
     emptyTitle: 'マップを読み込んで編集開始',
     emptyHint: '障害物は自動で背景除去され、左側の素材一覧に表示されます。',
     obstacleAria: '障害物 {name}',
@@ -179,41 +249,59 @@ const obstacleCopy = {
     larger: '拡大',
     duplicate: '複製',
     delete: '削除',
+    clearObstacles: 'Clear Obstacles',
   },
 }
 
+Object.assign(obstacleCopy.zh, {
+  baseMap: '地图底图',
+  assetsLabel: '障碍物组',
+  gridLabel: '网格设置',
+  exportLabel: '导出',
+})
+
+Object.assign(obstacleCopy.ja, {
+  baseMap: 'ベースマップ',
+  assetsLabel: '障害物素材',
+  gridLabel: 'グリッド設定',
+  exportLabel: 'エクスポート',
+  clearObstacles: '障害物をクリア',
+})
+
+Object.assign(obstacleCopy.zh, {
+  multiSelect: '多选',
+  selectedAssets: '已选择 {count} 个素材',
+  randomPlace: '随机摆放',
+  randomPlaced: '已随机摆放 {count} 个阻挡物。',
+  selectAssetsFirst: '请先选择阻挡物素材。',
+  paint: '放置素材',
+  collisionPaint: '绘制碰撞',
+  erase: '擦除碰撞',
+  collisionRuleTitle: '碰撞规则',
+  playerOnlyBoundary: '仅玩家边界',
+  playerOnlyBoundaryHint: '只有玩家无法通过这些碰撞格。',
+  allEntityObstacle: '全实体阻挡',
+  allEntityObstacleHint: '所有实体无法通过，带 ignoreCollisionEnemy 标记的敌人除外。',
+})
+
+Object.assign(obstacleCopy.ja, {
+  multiSelect: '複数選択',
+  selectedAssets: '{count} 個選択中',
+  randomPlace: 'ランダム配置',
+  randomPlaced: '{count} 個をランダム配置しました。',
+  selectAssetsFirst: '障害物素材を選択してください。',
+  paint: '素材配置',
+  collisionPaint: '衝突を描画',
+  erase: '衝突を消去',
+  collisionRuleTitle: '衝突ルール',
+  playerOnlyBoundary: 'プレイヤーのみ',
+  playerOnlyBoundaryHint: 'プレイヤーだけが通過できません。',
+  allEntityObstacle: '全エンティティ',
+  allEntityObstacleHint: 'ignoreCollisionEnemy タグ付きの敵以外をブロックします。',
+})
+
 function formatCopy(template: string, params: Record<string, string | number>): string {
   return template.replace(/\{(\w+)\}/g, (_, key) => String(params[key] ?? ''))
-}
-
-async function imageHasTransparentBackground(file: File): Promise<boolean> {
-  const url = URL.createObjectURL(file)
-  try {
-    const image = await new Promise<HTMLImageElement>((resolve, reject) => {
-      const img = new Image()
-      img.onload = () => resolve(img)
-      img.onerror = () => reject(new Error('Image decode failed'))
-      img.src = url
-    })
-    const sampleMaxSize = 360
-    const scale = Math.min(1, sampleMaxSize / Math.max(image.width, image.height, 1))
-    const width = Math.max(1, Math.round(image.width * scale))
-    const height = Math.max(1, Math.round(image.height * scale))
-    const canvas = document.createElement('canvas')
-    canvas.width = width
-    canvas.height = height
-    const ctx = canvas.getContext('2d', { willReadFrequently: true })
-    if (!ctx) return false
-    ctx.drawImage(image, 0, 0, width, height)
-    const data = ctx.getImageData(0, 0, width, height).data
-    let transparentPixels = 0
-    for (let i = 3; i < data.length; i += 4) {
-      if ((data[i] ?? 255) < 245) transparentPixels += 1
-    }
-    return transparentPixels / Math.max(1, data.length / 4) > 0.005
-  } finally {
-    URL.revokeObjectURL(url)
-  }
 }
 
 async function collisionCellsFromVisibleAlpha(
@@ -256,9 +344,17 @@ async function collisionCellsFromVisibleAlpha(
   return visibleCells.length ? visibleCells : rectCells
 }
 
-export default function ObstaclePainter({ initialMapFile = null }: { initialMapFile?: File | null }) {
+export default function ObstaclePainter({
+  toolId = 'map-studio',
+  initialMapFile = null,
+  projectContext = null,
+}: {
+  toolId?: string
+  initialMapFile?: File | null
+  projectContext?: GameProjectContext | null
+}) {
   const { lang } = useLanguage()
-  const copy = obstacleCopy[lang]
+  const copy = obstacleCopy[lang] as typeof obstacleCopy.en
   const uploadFolderLabel = lang === 'en' ? 'Upload Folder' : '上传文件夹'
   const statusLabel = useCallback((status: ObstacleAsset['matteStatus']) => {
     if (status === 'processed') return copy.statusProcessed
@@ -270,10 +366,14 @@ export default function ObstaclePainter({ initialMapFile = null }: { initialMapF
   const [mapImage, setMapImage] = useState<LoadedImage | null>(null)
   const [assets, setAssets] = useState<ObstacleAsset[]>([])
   const [selectedAssetId, setSelectedAssetId] = useState<string | null>(null)
+  const [assetMultiSelectEnabled, setAssetMultiSelectEnabled] = useState(false)
+  const [selectedAssetIds, setSelectedAssetIds] = useState<Set<string>>(() => new Set())
   const [instances, setInstances] = useState<ObstacleInstance[]>([])
   const [selectedInstanceId, setSelectedInstanceId] = useState<string | null>(null)
   const [collisionCells, setCollisionCells] = useState<CollisionCell[]>([])
+  const [erasedCellKeys, setErasedCellKeys] = useState<Set<string>>(() => new Set())
   const [gridSize, setGridSize] = useState<ObstacleGridSize>(32)
+  const [collisionBlockMode, setCollisionBlockMode] = useState<CollisionBlockMode>('allEntityObstacle')
   const [gridVisible, setGridVisible] = useState(true)
   const [tool, setTool] = useState<CollisionTool>('select')
   const [zoom, setZoom] = useState(1)
@@ -302,6 +402,10 @@ export default function ObstaclePainter({ initialMapFile = null }: { initialMapF
   cleanupRef.current = { mapImage, assets }
 
   const selectedAsset = useMemo(() => assets.find((asset) => asset.id === selectedAssetId) ?? null, [assets, selectedAssetId])
+  const randomSelectedAssets = useMemo(
+    () => assets.filter((asset) => selectedAssetIds.has(asset.id)),
+    [assets, selectedAssetIds],
+  )
   const selectedInstance = useMemo(() => instances.find((instance) => instance.id === selectedInstanceId) ?? null, [instances, selectedInstanceId])
   const selectedInstanceAsset = useMemo(
     () => selectedInstance ? assets.find((asset) => asset.id === selectedInstance.assetId) ?? null : null,
@@ -310,6 +414,7 @@ export default function ObstaclePainter({ initialMapFile = null }: { initialMapF
   const selectedInstanceScalePercent = selectedInstance && selectedInstanceAsset
     ? Math.round((selectedInstance.width / Math.max(1, selectedInstanceAsset.width)) * 100)
     : 100
+  const zoomPercent = Math.round(zoom * 100)
 
   const deleteSelectedInstance = useCallback(() => {
     if (!selectedInstanceId) return
@@ -317,6 +422,21 @@ export default function ObstaclePainter({ initialMapFile = null }: { initialMapF
     setCollisionCells((prev) => prev.filter((cell) => cell.sourceInstanceId !== selectedInstanceId))
     setSelectedInstanceId(null)
   }, [selectedInstanceId])
+
+  const clearObstacleLayer = useCallback(() => {
+    setInstances([])
+    setSelectedInstanceId(null)
+    setCollisionCells((prev) => prev.filter((cell) => !cell.sourceInstanceId))
+    setErasedCellKeys(new Set())
+  }, [])
+
+  const applyGeneratedCellsForInstance = useCallback((
+    instanceId: string,
+    cells: CollisionCell[],
+    erasedKeys = erasedCellKeys,
+  ) => {
+    setCollisionCells((prev) => replaceCellsForInstance(prev, instanceId, cells, erasedKeys))
+  }, [erasedCellKeys])
 
   const deleteAsset = useCallback((assetId: string) => {
     const asset = assets.find((item) => item.id === assetId)
@@ -328,6 +448,11 @@ export default function ObstaclePainter({ initialMapFile = null }: { initialMapF
     setInstances((prev) => prev.filter((item) => item.assetId !== assetId))
     setCollisionCells((prev) => prev.filter((cell) => !cell.sourceInstanceId || !removedInstanceIds.has(cell.sourceInstanceId)))
     if (selectedAssetId === assetId) setSelectedAssetId(nextAssets[0]?.id ?? null)
+    setSelectedAssetIds((prev) => {
+      const next = new Set(prev)
+      next.delete(assetId)
+      return next
+    })
     if (selectedInstanceId && removedInstanceIds.has(selectedInstanceId)) setSelectedInstanceId(null)
   }, [assets, instances, selectedAssetId, selectedInstanceId])
 
@@ -379,23 +504,23 @@ export default function ObstaclePainter({ initialMapFile = null }: { initialMapF
     return collisionCellsFromVisibleAlpha(asset, instance, nextGridSize, mapImage.width, mapImage.height)
   }, [assets, gridSize, mapImage])
 
-  const rebuildAllCollisionCells = useCallback(async (nextGridSize: ObstacleGridSize, nextInstances = instances) => {
+  const rebuildAllCollisionCells = useCallback(async (
+    nextGridSize: ObstacleGridSize,
+    nextInstances = instances,
+    nextErasedCellKeys = erasedCellKeys,
+  ) => {
     if (!mapImage) {
       setCollisionCells([])
       return
     }
     const chunks = await Promise.all(nextInstances.map((instance) => recomputeInstanceCells(instance, nextGridSize)))
-    setCollisionCells(chunks.flat())
-  }, [instances, mapImage, recomputeInstanceCells])
+    setCollisionCells(chunks.flat().filter((cell) => !nextErasedCellKeys.has(cellKey(cell.gridX, cell.gridY))))
+  }, [erasedCellKeys, instances, mapImage, recomputeInstanceCells])
 
   const selectMap = useCallback(async (file: File | null) => {
     if (!file) return
     if (!file.type.startsWith('image/')) {
       message.error(copy.chooseMap)
-      return
-    }
-    if (file.size > MAX_IMAGE_MB * 1024 * 1024) {
-      message.error(formatCopy(copy.tooLarge, { size: MAX_IMAGE_MB }))
       return
     }
     try {
@@ -406,6 +531,7 @@ export default function ObstaclePainter({ initialMapFile = null }: { initialMapF
       })
       setInstances([])
       setCollisionCells([])
+      setErasedCellKeys(new Set())
       setSelectedInstanceId(null)
       setZoom(1)
       setPan({ x: 0, y: 0 })
@@ -435,24 +561,18 @@ export default function ObstaclePainter({ initialMapFile = null }: { initialMapF
     const loadedAssets: ObstacleAsset[] = []
     try {
       for (const file of imageFiles) {
-        if (file.size > MAX_IMAGE_MB * 1024 * 1024) {
-          message.warning(formatCopy(copy.skippedLarge, { name: file.name, size: MAX_IMAGE_MB }))
-          continue
-        }
         let nextFile = file
         let matteStatus: ObstacleAsset['matteStatus'] = 'original'
         if (autoMatteEnabled) {
-          try {
-            if (await imageHasTransparentBackground(file)) {
-              matteStatus = 'original'
-            } else {
-              const blob = await removeBackground(file)
-              nextFile = new File([blob], file.name.replace(/\.[^.]+$/, '') + '_matte.png', { type: 'image/png' })
-              matteStatus = 'processed'
-            }
-          } catch (error) {
+          const result = await removeBackgroundIfNeeded(file, { skipTransparent: true, maxImageMb: MAX_IMAGE_MB })
+          if (result.status === 'too-large') {
+            message.warning(formatCopy(copy.skippedLarge, { name: file.name, size: MAX_IMAGE_MB }))
+          } else if (result.status === 'processed') {
+            nextFile = new File([result.blob], file.name.replace(/\.[^.]+$/, '') + '_matte.png', { type: 'image/png' })
+            matteStatus = 'processed'
+          } else if (result.status === 'failed') {
             matteStatus = 'failed'
-            message.warning(formatCopy(copy.matteFailedUseOriginal, { name: file.name, error: String(error) }))
+            message.warning(formatCopy(copy.matteFailedUseOriginal, { name: file.name, error: String(result.error ?? 'unknown error') }))
           }
         }
         const loaded = await loadImageFile(nextFile)
@@ -468,38 +588,189 @@ export default function ObstaclePainter({ initialMapFile = null }: { initialMapF
     }
   }, [autoMatteEnabled, copy, message])
 
-  const placeAssetAt = useCallback(async (asset: ObstacleAsset, centerX: number, centerY: number) => {
+  const setZoomWithFocalPoint = useCallback((nextZoomValue: number, clientX?: number, clientY?: number) => {
+    const nextZoom = clamp(nextZoomValue, MIN_ZOOM, MAX_ZOOM)
+    if (!workspaceRef.current || !mapImage) {
+      setZoom(nextZoom)
+      return
+    }
+    const rect = workspaceRef.current.getBoundingClientRect()
+    const focalX = clientX ?? rect.left + rect.width / 2
+    const focalY = clientY ?? rect.top + rect.height / 2
+    const mapX = (focalX - (rect.left + rect.width / 2 + pan.x)) / zoom + mapImage.width / 2
+    const mapY = (focalY - (rect.top + rect.height / 2 + pan.y)) / zoom + mapImage.height / 2
+    setZoom(nextZoom)
+    setPan({
+      x: focalX - rect.left - rect.width / 2 - (mapX - mapImage.width / 2) * nextZoom,
+      y: focalY - rect.top - rect.height / 2 - (mapY - mapImage.height / 2) * nextZoom,
+    })
+  }, [mapImage, pan.x, pan.y, zoom])
+
+  const placeAssetAt = useCallback(async (asset: ObstacleAsset, mapX: number, mapY: number, anchor: 'cell' | 'center' = 'cell') => {
     if (!mapImage) {
       message.warning(copy.importMapFirst)
       return
     }
-    const width = Math.max(MIN_OBSTACLE_SIZE, Math.round(asset.width))
-    const height = Math.max(MIN_OBSTACLE_SIZE, Math.round(asset.height))
+    const fitted = fitAssetToMap(asset, mapImage)
+    const anchorX = anchor === 'center' ? mapX - fitted.width / 2 : mapX
+    const anchorY = anchor === 'center' ? mapY - fitted.height / 2 : mapY
+    const { gridX, gridY } = snapCellFromPixel(anchorX, anchorY, gridSize)
+    const width = fitted.width
+    const height = fitted.height
+    const x = clamp(gridX * gridSize, 0, Math.max(0, mapImage.width - width))
+    const y = clamp(gridY * gridSize, 0, Math.max(0, mapImage.height - height))
     const instance: ObstacleInstance = {
       id: makeId('obs'),
       assetId: asset.id,
       assetName: asset.name,
-      x: Math.round(clamp(centerX - width / 2, 0, Math.max(0, mapImage.width - width))),
-      y: Math.round(clamp(centerY - height / 2, 0, Math.max(0, mapImage.height - height))),
+      gridX,
+      gridY,
+      x,
+      y,
       width,
       height,
+      scale: fitted.scale,
       rotation: 0,
       opacity: 1,
       collisionMode: 'solid',
+      collisionType: 'solid',
+      layer: 0,
     }
     setInstances((prev) => [...prev, instance])
     setSelectedInstanceId(instance.id)
     const cells = await collisionCellsFromVisibleAlpha(asset, instance, gridSize, mapImage.width, mapImage.height)
-    setCollisionCells((prev) => replaceCellsForInstance(prev, instance.id, cells))
-  }, [copy, gridSize, mapImage, message])
+    setErasedCellKeys((prev) => {
+      const next = new Set(prev)
+      cells.forEach((cell) => next.delete(cellKey(cell.gridX, cell.gridY)))
+      return next
+    })
+    const nextErasedCellKeys = new Set([...erasedCellKeys].filter((key) => !cells.some((cell) => cellKey(cell.gridX, cell.gridY) === key)))
+    applyGeneratedCellsForInstance(instance.id, cells, nextErasedCellKeys)
+  }, [applyGeneratedCellsForInstance, copy, erasedCellKeys, gridSize, mapImage, message])
 
   const placeSelectedAsset = useCallback(async () => {
     if (!selectedAsset || !mapImage) {
       message.warning(copy.importMapAndAssetFirst)
       return
     }
-    await placeAssetAt(selectedAsset, mapImage.width / 2, mapImage.height / 2)
+    await placeAssetAt(selectedAsset, mapImage.width / 2, mapImage.height / 2, 'center')
   }, [copy, mapImage, message, placeAssetAt, selectedAsset])
+
+  const toggleAssetMultiSelect = useCallback((assetId: string) => {
+    setSelectedAssetIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(assetId)) {
+        next.delete(assetId)
+      } else {
+        next.add(assetId)
+      }
+      return next
+    })
+  }, [])
+
+  const randomPlaceSelectedAssets = useCallback(async () => {
+    if (!mapImage) {
+      message.warning(copy.importMapFirst)
+      return
+    }
+    if (!randomSelectedAssets.length) {
+      message.warning(copy.selectAssetsFirst)
+      return
+    }
+
+    const mapArea = mapImage.width * mapImage.height
+    const targetCount = Math.min(
+      RANDOM_OBSTACLE_MAX_COUNT,
+      Math.max(randomSelectedAssets.length, Math.round((mapArea / (gridSize * gridSize)) * RANDOM_OBSTACLE_DENSITY)),
+    )
+    const mapShortSide = Math.min(mapImage.width, mapImage.height)
+    const maxRandomSide = Math.max(MIN_OBSTACLE_SIZE, mapShortSide * RANDOM_OBSTACLE_MAX_SHORT_SIDE_RATIO)
+    const occupiedRects: Array<{ x: number; y: number; width: number; height: number }> = instances.map((instance) => ({
+      x: instance.x,
+      y: instance.y,
+      width: instance.width,
+      height: instance.height,
+    }))
+    const nextInstances: ObstacleInstance[] = []
+
+    for (let index = 0; index < targetCount; index += 1) {
+      const asset = index < randomSelectedAssets.length
+        ? randomSelectedAssets[index]
+        : randomSelectedAssets[Math.floor(Math.random() * randomSelectedAssets.length)]
+      const scaleCap = Math.min(
+        RANDOM_OBSTACLE_MAX_SCALE,
+        mapImage.width / Math.max(1, asset.width),
+        mapImage.height / Math.max(1, asset.height),
+        maxRandomSide / Math.max(1, asset.width),
+        maxRandomSide / Math.max(1, asset.height),
+      )
+      const scale = Math.max(0.01, Math.min(randomBetween(RANDOM_OBSTACLE_MIN_SCALE, RANDOM_OBSTACLE_MAX_SCALE), scaleCap))
+      const width = clamp(Math.round(asset.width * scale), MIN_OBSTACLE_SIZE, mapImage.width)
+      const height = clamp(Math.round(asset.height * scale), MIN_OBSTACLE_SIZE, mapImage.height)
+      const maxGridX = Math.max(0, Math.floor((mapImage.width - width) / gridSize))
+      const maxGridY = Math.max(0, Math.floor((mapImage.height - height) / gridSize))
+
+      let placed: ObstacleInstance | null = null
+      for (let attempt = 0; attempt < RANDOM_OBSTACLE_ATTEMPTS; attempt += 1) {
+        const gridX = Math.floor(Math.random() * (maxGridX + 1))
+        const gridY = Math.floor(Math.random() * (maxGridY + 1))
+        const x = clamp(gridX * gridSize, 0, Math.max(0, mapImage.width - width))
+        const y = clamp(gridY * gridSize, 0, Math.max(0, mapImage.height - height))
+        const candidate = { x, y, width, height }
+        if (occupiedRects.some((rect) => rectsOverlap(candidate, rect))) continue
+
+        placed = {
+          id: makeId('obs'),
+          assetId: asset.id,
+          assetName: asset.name,
+          gridX,
+          gridY,
+          x,
+          y,
+          width,
+          height,
+          scale,
+          rotation: 0,
+          opacity: 1,
+          collisionMode: 'solid',
+          collisionType: 'solid',
+          layer: 0,
+        }
+        break
+      }
+
+      if (placed) {
+        nextInstances.push(placed)
+        occupiedRects.push({ x: placed.x, y: placed.y, width: placed.width, height: placed.height })
+      }
+    }
+
+    if (!nextInstances.length) {
+      message.warning(formatCopy(copy.randomPlaced, { count: 0 }))
+      return
+    }
+
+    const cellChunks = await Promise.all(nextInstances.map(async (instance) => {
+      const asset = randomSelectedAssets.find((item) => item.id === instance.assetId)
+      return {
+        instance,
+        cells: asset
+          ? await collisionCellsFromVisibleAlpha(asset, instance, gridSize, mapImage.width, mapImage.height)
+          : cellsFromRect(instance, gridSize, mapImage.width, mapImage.height, instance.id),
+      }
+    }))
+    const placedCellKeys = new Set(cellChunks.flatMap((chunk) => chunk.cells.map((cell) => cellKey(cell.gridX, cell.gridY))))
+    const nextErasedCellKeys = new Set([...erasedCellKeys].filter((key) => !placedCellKeys.has(key)))
+
+    setInstances((prev) => [...prev, ...nextInstances])
+    setSelectedInstanceId(nextInstances[nextInstances.length - 1]?.id ?? null)
+    setErasedCellKeys(nextErasedCellKeys)
+    setCollisionCells((prev) => cellChunks.reduce(
+      (cells, chunk) => replaceCellsForInstance(cells, chunk.instance.id, chunk.cells, nextErasedCellKeys),
+      prev,
+    ))
+    message.success(formatCopy(copy.randomPlaced, { count: nextInstances.length }))
+  }, [copy, erasedCellKeys, gridSize, instances, mapImage, message, randomSelectedAssets])
 
   const updateInstance = useCallback(async (instanceId: string, updater: (instance: ObstacleInstance) => ObstacleInstance, recompute = false) => {
     let nextInstance: ObstacleInstance | null = null
@@ -510,38 +781,47 @@ export default function ObstaclePainter({ initialMapFile = null }: { initialMapF
     }))
     if (recompute && nextInstance) {
       const cells = await recomputeInstanceCells(nextInstance)
-      setCollisionCells((prev) => replaceCellsForInstance(prev, instanceId, cells))
+      applyGeneratedCellsForInstance(instanceId, cells)
     }
-  }, [recomputeInstanceCells])
+  }, [applyGeneratedCellsForInstance, recomputeInstanceCells])
 
   const duplicateSelectedInstance = useCallback(async () => {
     if (!selectedInstance || !mapImage) return
     const next: ObstacleInstance = {
       ...selectedInstance,
       id: makeId('obs'),
+      gridX: (selectedInstance.gridX ?? Math.floor(selectedInstance.x / gridSize)) + 1,
+      gridY: selectedInstance.gridY ?? Math.floor(selectedInstance.y / gridSize),
       x: clamp(selectedInstance.x + gridSize, 0, Math.max(0, mapImage.width - selectedInstance.width)),
-      y: clamp(selectedInstance.y + gridSize, 0, Math.max(0, mapImage.height - selectedInstance.height)),
+      y: clamp(selectedInstance.y, 0, Math.max(0, mapImage.height - selectedInstance.height)),
     }
     setInstances((prev) => [...prev, next])
     setSelectedInstanceId(next.id)
     const cells = await recomputeInstanceCells(next)
-    setCollisionCells((prev) => replaceCellsForInstance(prev, next.id, cells))
-  }, [gridSize, mapImage, recomputeInstanceCells, selectedInstance])
+    applyGeneratedCellsForInstance(next.id, cells)
+  }, [applyGeneratedCellsForInstance, gridSize, mapImage, recomputeInstanceCells, selectedInstance])
 
-  const resizeSelectedInstance = useCallback(async (ratio: number) => {
-    if (!selectedInstanceId || !mapImage) return
-    await updateInstance(selectedInstanceId, (item) => {
+  const resizeInstance = useCallback(async (instanceId: string, ratio: number) => {
+    if (!mapImage) return
+    await updateInstance(instanceId, (item) => {
       const width = clamp(Math.round(item.width * ratio), 8, mapImage.width)
       const height = clamp(Math.round(item.height * ratio), 8, mapImage.height)
+      const asset = assets.find((candidate) => candidate.id === item.assetId)
       return {
         ...item,
         width,
         height,
+        scale: asset ? width / Math.max(1, asset.width) : item.scale,
         x: clamp(item.x, 0, Math.max(0, mapImage.width - width)),
         y: clamp(item.y, 0, Math.max(0, mapImage.height - height)),
       }
     }, true)
-  }, [mapImage, selectedInstanceId, updateInstance])
+  }, [assets, mapImage, updateInstance])
+
+  const resizeSelectedInstance = useCallback(async (ratio: number) => {
+    if (!selectedInstanceId) return
+    await resizeInstance(selectedInstanceId, ratio)
+  }, [resizeInstance, selectedInstanceId])
 
   const resizeSelectedInstanceToScale = useCallback(async (scalePercent: number) => {
     if (!selectedInstanceId || !mapImage) return
@@ -557,6 +837,7 @@ export default function ObstaclePainter({ initialMapFile = null }: { initialMapF
         ...item,
         width,
         height,
+        scale,
         x: clamp(item.x, 0, Math.max(0, mapImage.width - width)),
         y: clamp(item.y, 0, Math.max(0, mapImage.height - height)),
       }
@@ -591,7 +872,7 @@ export default function ObstaclePainter({ initialMapFile = null }: { initialMapF
     event.preventDefault()
     event.stopPropagation()
     setSelectedInstanceId(instance.id)
-    void resizeSelectedInstanceByWheel(event.deltaY)
+    void resizeInstance(instance.id, Math.exp(-event.deltaY * 0.0015))
   }
 
   const applyCollisionTool = useCallback((clientX: number, clientY: number) => {
@@ -601,16 +882,35 @@ export default function ObstaclePainter({ initialMapFile = null }: { initialMapF
     if (point.x < 0 || point.y < 0 || point.x >= mapImage.width || point.y >= mapImage.height) return
     const { gridX, gridY } = snapCellFromPixel(point.x, point.y, gridSize)
     if (tool === 'paint') {
+      if (selectedAsset) {
+        void placeAssetAt(selectedAsset, gridX * gridSize, gridY * gridSize)
+      }
+      return
+    }
+    if (tool === 'collision') {
+      const paintedKey = cellKey(gridX, gridY)
+      setErasedCellKeys((prev) => {
+        const next = new Set(prev)
+        next.delete(paintedKey)
+        return next
+      })
       setCollisionCells((prev) => upsertManualCell(prev, makeCollisionCell(gridX, gridY, gridSize)))
     } else if (tool === 'erase') {
+      const erasedKey = cellKey(gridX, gridY)
+      setErasedCellKeys((prev) => {
+        const next = new Set(prev)
+        next.add(erasedKey)
+        return next
+      })
       setCollisionCells((prev) => removeCell(prev, gridX, gridY))
     }
-  }, [gridSize, mapImage, pointerToMap, tool])
+  }, [gridSize, mapImage, placeAssetAt, pointerToMap, selectedAsset, tool])
 
   const onWorkspaceMouseDown = (event: ReactMouseEvent<HTMLDivElement>) => {
     if (!mapImage) return
-    if (event.button === 2 || spaceDown) {
+    if (event.button === 2 || spaceDown || (event.button === 0 && tool === 'select')) {
       event.preventDefault()
+      if (tool === 'select') setSelectedInstanceId(null)
       setDragState({
         type: 'pan',
         startClientX: event.clientX,
@@ -619,7 +919,7 @@ export default function ObstaclePainter({ initialMapFile = null }: { initialMapF
       })
       return
     }
-    if (tool === 'paint' || tool === 'erase') {
+    if (tool === 'paint' || tool === 'collision' || tool === 'erase') {
       event.preventDefault()
       applyCollisionTool(event.clientX, event.clientY)
       return
@@ -628,7 +928,7 @@ export default function ObstaclePainter({ initialMapFile = null }: { initialMapF
   }
 
   const onWorkspaceMouseMove = (event: ReactMouseEvent<HTMLDivElement>) => {
-    if (tool !== 'select' && event.buttons === 1) applyCollisionTool(event.clientX, event.clientY)
+    if ((tool === 'collision' || tool === 'erase') && event.buttons === 1) applyCollisionTool(event.clientX, event.clientY)
     if (!dragState || !mapImage) return
     if (dragState.type === 'pan') {
       setPan({
@@ -644,10 +944,15 @@ export default function ObstaclePainter({ initialMapFile = null }: { initialMapF
       if (!point || startMapX === undefined || startMapY === undefined) return
       setInstances((prev) => prev.map((item) => {
         if (item.id !== dragState.instanceId) return item
+        const x = Math.round(clamp((dragState.startX ?? item.x) + point.x - startMapX, 0, Math.max(0, mapImage.width - item.width)))
+        const y = Math.round(clamp((dragState.startY ?? item.y) + point.y - startMapY, 0, Math.max(0, mapImage.height - item.height)))
+        const snapped = snapCellFromPixel(x, y, gridSize)
         return {
           ...item,
-          x: Math.round(clamp((dragState.startX ?? item.x) + point.x - startMapX, 0, Math.max(0, mapImage.width - item.width))),
-          y: Math.round(clamp((dragState.startY ?? item.y) + point.y - startMapY, 0, Math.max(0, mapImage.height - item.height))),
+          gridX: snapped.gridX,
+          gridY: snapped.gridY,
+          x,
+          y,
         }
       }))
     }
@@ -658,25 +963,21 @@ export default function ObstaclePainter({ initialMapFile = null }: { initialMapF
       const instance = instances.find((item) => item.id === dragState.instanceId)
       if (instance) {
         const cells = await recomputeInstanceCells(instance)
-        setCollisionCells((prev) => replaceCellsForInstance(prev, instance.id, cells))
+        applyGeneratedCellsForInstance(instance.id, cells)
       }
     }
     setDragState(null)
-  }, [dragState, instances, recomputeInstanceCells])
+  }, [applyGeneratedCellsForInstance, dragState, instances, recomputeInstanceCells])
 
   const onWheel = (event: ReactWheelEvent<HTMLDivElement>) => {
     if (!workspaceRef.current || !mapImage) return
     event.preventDefault()
-    const rect = workspaceRef.current.getBoundingClientRect()
-    const oldZoom = zoom
-    const nextZoom = clamp(oldZoom * Math.exp(-event.deltaY * 0.0015), MIN_ZOOM, MAX_ZOOM)
-    const mapX = (event.clientX - (rect.left + rect.width / 2 + pan.x)) / oldZoom + mapImage.width / 2
-    const mapY = (event.clientY - (rect.top + rect.height / 2 + pan.y)) / oldZoom + mapImage.height / 2
-    setZoom(nextZoom)
-    setPan({
-      x: event.clientX - rect.left - rect.width / 2 - (mapX - mapImage.width / 2) * nextZoom,
-      y: event.clientY - rect.top - rect.height / 2 - (mapY - mapImage.height / 2) * nextZoom,
-    })
+    const target = event.target as HTMLElement
+    if (selectedInstanceId && target.closest('.map-studio-instance-size-control')) {
+      void resizeSelectedInstanceByWheel(event.deltaY)
+      return
+    }
+    setZoomWithFocalPoint(zoom * Math.exp(-event.deltaY * 0.0015), event.clientX, event.clientY)
   }
 
   const onAssetDragStart = (event: ReactDragEvent<HTMLElement>, assetId: string) => {
@@ -709,23 +1010,81 @@ export default function ObstaclePainter({ initialMapFile = null }: { initialMapF
 
   const exportObstacleJson = useCallback(() => {
     if (!mapImage) return
-    const payload = buildObstacleJson(mapImage, gridSize, instances, collisionCells)
-    downloadBlob(new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }), 'map_collision.json')
-  }, [collisionCells, gridSize, instances, mapImage])
+    const payload = buildObstacleJson(mapImage, gridSize, collisionBlockMode, assets, instances, collisionCells)
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
+    downloadBlob(blob, 'map_collision.json')
+    void blobToDataUrl(blob).then((dataUrl) => {
+      postToolHostMessage({
+        type: 'droi.tool.exportArtifact.v1',
+        protocol: DROI_GAME_TOOL_PROTOCOL,
+        toolId,
+        artifact: {
+          toolId,
+          artifactType: 'obstacleLayout',
+          files: [{ name: 'map_collision.json', mimeType: 'application/json', dataUrl }],
+          metadata: droiTargetMetadata(projectContext, 'export-obstacle-layout'),
+          manifestPatch: {
+            obstacleLayout: 'artifacts/map_collision.json',
+            collisionRule: payload.collisionRule,
+          },
+        },
+      })
+    })
+  }, [assets, collisionBlockMode, collisionCells, gridSize, instances, mapImage, projectContext, toolId])
 
   const exportPng = useCallback(async () => {
     if (!mapImage) return
     try {
       const canvas = await renderMapWithObstacles(mapImage, assets, instances)
-      downloadBlob(await canvasToBlob(canvas), 'map_with_obstacles.png')
+      const blob = await canvasToBlob(canvas)
+      await imageBlobToZip(blob, 'map_with_obstacles.png', 'map_with_obstacles.zip', {
+        type: 'mapWithObstacles',
+        mapWidth: mapImage.width,
+        mapHeight: mapImage.height,
+        gridSize,
+        collisionRule: {
+          blockMode: collisionBlockMode,
+          affects: collisionBlockMode === 'playerOnlyBoundary' ? 'player' : 'allEntities',
+          ignoredByTags: collisionBlockMode === 'allEntityObstacle' ? ['ignoreCollisionEnemy'] : [],
+        },
+        obstacleCount: instances.length,
+      })
+      postToolHostMessage({
+        type: 'droi.tool.exportArtifact.v1',
+        protocol: DROI_GAME_TOOL_PROTOCOL,
+        toolId,
+        artifact: {
+          toolId,
+          artifactType: 'map',
+          files: [{ name: 'map_with_obstacles.png', mimeType: 'image/png', dataUrl: await blobToDataUrl(blob) }],
+          metadata: droiTargetMetadata(projectContext, 'export-map-with-obstacles'),
+          manifestPatch: { map: 'artifacts/map_with_obstacles.png' },
+        },
+      })
     } catch (error) {
       message.error(String(error))
     }
-  }, [assets, instances, mapImage, message])
+  }, [assets, collisionBlockMode, gridSize, instances, mapImage, message, projectContext, toolId])
 
   const changeGridSize = async (next: ObstacleGridSize) => {
+    const realignedInstances = instances.map((instance) => {
+      const gridX = instance.gridX ?? Math.floor(instance.x / gridSize)
+      const gridY = instance.gridY ?? Math.floor(instance.y / gridSize)
+      return {
+        ...instance,
+        gridX,
+        gridY,
+        x: clamp(gridX * next, 0, Math.max(0, mapImage ? mapImage.width - instance.width : gridX * next)),
+        y: clamp(gridY * next, 0, Math.max(0, mapImage ? mapImage.height - instance.height : gridY * next)),
+        width: instance.width,
+        height: instance.height,
+      }
+    })
+    const clearedErases = new Set<string>()
     setGridSize(next)
-    await rebuildAllCollisionCells(next)
+    setInstances(realignedInstances)
+    setErasedCellKeys(clearedErases)
+    await rebuildAllCollisionCells(next, realignedInstances, clearedErases)
   }
 
   const gridColumns = mapImage ? Math.ceil(mapImage.width / gridSize) : 0
@@ -738,7 +1097,7 @@ export default function ObstaclePainter({ initialMapFile = null }: { initialMapF
           <Text className="map-studio-section-label">{copy.baseMap}</Text>
           <Text className="map-studio-section-title">{copy.mapTitle}</Text>
           <Text className="map-studio-section-copy">{copy.mapCopy}</Text>
-          <input ref={mapInputRef} hidden type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => void selectMap(event.target.files?.[0] ?? null)} />
+          <input data-testid="obstacle-map-input" ref={mapInputRef} hidden type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => void selectMap(event.target.files?.[0] ?? null)} />
           <Button className="map-studio-primary-btn" block icon={<EnvironmentOutlined />} onClick={() => mapInputRef.current?.click()}>
             {mapImage ? copy.replaceMap : copy.uploadMap}
           </Button>
@@ -753,6 +1112,7 @@ export default function ObstaclePainter({ initialMapFile = null }: { initialMapF
             <span>{copy.autoMatte}</span>
           </label>
           <input
+            data-testid="obstacle-asset-input"
             ref={obstacleInputRef}
             hidden
             multiple
@@ -781,24 +1141,43 @@ export default function ObstaclePainter({ initialMapFile = null }: { initialMapF
           <Button className="map-studio-primary-btn" block icon={<UploadOutlined />} loading={isProcessingMatte} onClick={() => obstacleFolderInputRef.current?.click()}>
             {uploadFolderLabel}
           </Button>
+          <label className="map-studio-inline-toggle">
+            <Switch data-testid="asset-multi-select-toggle" checked={assetMultiSelectEnabled} onChange={setAssetMultiSelectEnabled} />
+            <span>{copy.multiSelect}</span>
+          </label>
+          <Text className="map-studio-meta">
+            {formatCopy(copy.selectedAssets, { count: assetMultiSelectEnabled ? randomSelectedAssets.length : selectedAsset ? 1 : 0 })}
+          </Text>
           <div className="map-studio-asset-grid">
             {assets.map((asset) => (
               <div
                 key={asset.id}
+                data-testid={`obstacle-asset-card-${asset.name}`}
                 role="button"
                 tabIndex={0}
                 draggable
-                className={`map-studio-asset-card ${selectedAssetId === asset.id ? 'selected' : ''}`}
-                onClick={() => setSelectedAssetId(asset.id)}
+                className={`map-studio-asset-card ${
+                  (assetMultiSelectEnabled ? selectedAssetIds.has(asset.id) : selectedAssetId === asset.id) ? 'selected' : ''
+                } ${assetMultiSelectEnabled && selectedAssetIds.has(asset.id) ? 'multi-selected' : ''}`}
+                onClick={() => {
+                  setSelectedAssetId(asset.id)
+                  if (assetMultiSelectEnabled) toggleAssetMultiSelect(asset.id)
+                }}
                 onKeyDown={(event) => {
                   if (event.key === 'Enter' || event.key === ' ') {
                     event.preventDefault()
                     setSelectedAssetId(asset.id)
+                    if (assetMultiSelectEnabled) toggleAssetMultiSelect(asset.id)
                   }
                 }}
                 onDragStart={(event) => onAssetDragStart(event, asset.id)}
                 onDragEnd={onAssetDragEnd}
               >
+                {assetMultiSelectEnabled && (
+                  <span className="map-studio-asset-check" aria-hidden="true">
+                    <CheckOutlined />
+                  </span>
+                )}
                 <button
                   type="button"
                   className="map-studio-asset-delete"
@@ -818,7 +1197,17 @@ export default function ObstaclePainter({ initialMapFile = null }: { initialMapF
               </div>
             ))}
           </div>
-          <Button className="map-studio-primary-btn" block icon={<DragOutlined />} disabled={!selectedAsset || !mapImage} onClick={() => void placeSelectedAsset()}>
+          <Button
+            data-testid="random-place-obstacles"
+            className="map-studio-primary-btn"
+            block
+            icon={<DragOutlined />}
+            disabled={!assetMultiSelectEnabled || !mapImage || !randomSelectedAssets.length}
+            onClick={() => void randomPlaceSelectedAssets()}
+          >
+            {copy.randomPlace}
+          </Button>
+          <Button data-testid="add-obstacle-center" className="map-studio-primary-btn" block icon={<DragOutlined />} disabled={!selectedAsset || !mapImage} onClick={() => void placeSelectedAsset()}>
             {copy.addToCenter}
           </Button>
         </section>
@@ -836,16 +1225,44 @@ export default function ObstaclePainter({ initialMapFile = null }: { initialMapF
               <Switch checked={gridVisible} onChange={setGridVisible} />
               <span>{copy.showGrid}</span>
             </label>
-            <Segmented<CollisionTool>
-              block
-              value={tool}
-              onChange={setTool}
-              options={[
-                { label: copy.select, value: 'select' },
-                { label: copy.paint, value: 'paint' },
-                { label: copy.erase, value: 'erase' },
-              ]}
-            />
+            <Text className="map-studio-section-title">{copy.collisionRuleTitle}</Text>
+            <div className="map-studio-collision-rule-grid" role="group" aria-label={copy.collisionRuleTitle}>
+              {([
+                ['playerOnlyBoundary', copy.playerOnlyBoundary, copy.playerOnlyBoundaryHint],
+                ['allEntityObstacle', copy.allEntityObstacle, copy.allEntityObstacleHint],
+              ] as Array<[CollisionBlockMode, string, string]>).map(([value, label, hint]) => (
+                <button
+                  key={value}
+                  type="button"
+                  data-testid={`collision-rule-${value}`}
+                  className={`map-studio-collision-rule ${collisionBlockMode === value ? 'is-active' : ''}`}
+                  onClick={() => setCollisionBlockMode(value)}
+                >
+                  <span>{label}</span>
+                  <small>{hint}</small>
+                </button>
+              ))}
+            </div>
+            <div className="map-studio-tool-grid" role="group" aria-label={copy.gridTitle}>
+              {([
+                ['select', copy.select],
+                ['paint', copy.paint],
+                ['collision', copy.collisionPaint],
+                ['erase', copy.erase],
+              ] as Array<[CollisionTool, string]>).map(([value, label]) => (
+                <Button
+                  key={value}
+                  className={`map-studio-tool-button ${tool === value ? 'is-active' : ''}`}
+                  type={tool === value ? 'primary' : 'default'}
+                  onClick={() => setTool(value)}
+                >
+                  {label}
+                </Button>
+              ))}
+            </div>
+            <Button block danger icon={<DeleteOutlined />} disabled={!instances.length && !collisionCells.length} onClick={clearObstacleLayer}>
+              {copy.clearObstacles}
+            </Button>
             <Text className="map-studio-meta">{formatCopy(copy.gridCount, { count: collisionCells.length, cols: gridColumns, rows: gridRows })}</Text>
           </Space>
         </section>
@@ -854,7 +1271,7 @@ export default function ObstaclePainter({ initialMapFile = null }: { initialMapF
           <Text className="map-studio-section-label">{copy.exportLabel}</Text>
           <Text className="map-studio-section-title">{copy.exportTitle}</Text>
           <Space orientation="vertical" style={{ width: '100%' }}>
-            <Button block icon={<DownloadOutlined />} disabled={!mapImage} onClick={exportObstacleJson}>{copy.exportJson}</Button>
+            <Button data-testid="export-obstacle-json" block icon={<DownloadOutlined />} disabled={!mapImage} onClick={exportObstacleJson}>{copy.exportJson}</Button>
             <Button block icon={<DownloadOutlined />} disabled={!mapImage} onClick={() => void exportPng()}>{copy.exportPng}</Button>
             <Text className="map-studio-meta">{copy.exportHint}</Text>
           </Space>
@@ -863,6 +1280,7 @@ export default function ObstaclePainter({ initialMapFile = null }: { initialMapF
 
       <main
         ref={workspaceRef}
+        data-testid="obstacle-workspace"
         className={`map-studio-obstacle-workspace ${spaceDown || dragState?.type === 'pan' ? 'is-panning' : ''}`}
         onContextMenu={(event) => event.preventDefault()}
         onMouseDown={onWorkspaceMouseDown}
@@ -873,6 +1291,34 @@ export default function ObstaclePainter({ initialMapFile = null }: { initialMapF
         onDragOver={onWorkspaceDragOver}
         onDrop={(event) => void onWorkspaceDrop(event)}
       >
+        {mapImage && (
+          <div className="map-studio-obstacle-zoom-tools" onWheel={(event) => {
+            event.preventDefault()
+            event.stopPropagation()
+          }}>
+            <Text>{copy.zoomLabel}</Text>
+            <Button
+              size="small"
+              icon={<PlusOutlined />}
+              aria-label={copy.larger}
+              onClick={() => setZoomWithFocalPoint(zoom * 1.15)}
+            />
+            <Slider
+              vertical
+              min={Math.round(MIN_ZOOM * 100)}
+              max={Math.round(MAX_ZOOM * 100)}
+              value={zoomPercent}
+              onChange={(value) => setZoomWithFocalPoint(value / 100)}
+            />
+            <Button
+              size="small"
+              icon={<MinusOutlined />}
+              aria-label={copy.smaller}
+              onClick={() => setZoomWithFocalPoint(zoom / 1.15)}
+            />
+            <Text>{zoomPercent}%</Text>
+          </div>
+        )}
         {!mapImage ? (
           <div className="map-studio-empty-state">
             <EnvironmentOutlined />
@@ -881,6 +1327,7 @@ export default function ObstaclePainter({ initialMapFile = null }: { initialMapF
           </div>
         ) : (
           <div
+            data-testid="obstacle-stage"
             className="map-studio-obstacle-stage"
             style={{
               width: mapImage.width,
@@ -923,26 +1370,40 @@ export default function ObstaclePainter({ initialMapFile = null }: { initialMapF
               <div
                 className="map-studio-instance-size-control"
                 style={{
-                  left: selectedInstance.x + selectedInstance.width + 12,
-                  top: selectedInstance.y,
-                  height: Math.max(150, selectedInstance.height),
+                  left: clamp(selectedInstance.x, 0, Math.max(0, mapImage.width - 292)),
+                  top: selectedInstance.y + selectedInstance.height + 12 <= mapImage.height - 58
+                    ? selectedInstance.y + selectedInstance.height + 12
+                    : Math.max(0, selectedInstance.y - 58),
                 }}
               >
-                <Text>{selectedInstance.width} × {selectedInstance.height}px</Text>
+                <Text className="map-studio-size-label">{copy.sizeLabel}</Text>
+                <Button
+                  size="small"
+                  icon={<MinusOutlined />}
+                  aria-label={copy.smaller}
+                  onClick={() => void resizeSelectedInstance(0.9)}
+                />
                 <Slider
-                  vertical
+                  className="map-studio-instance-size-slider"
                   min={1}
                   max={MAX_OBSTACLE_SCALE_PERCENT}
                   value={clamp(selectedInstanceScalePercent, 1, MAX_OBSTACLE_SCALE_PERCENT)}
                   onChange={(value) => void resizeSelectedInstanceToScale(value)}
                 />
+                <Button
+                  size="small"
+                  icon={<PlusOutlined />}
+                  aria-label={copy.larger}
+                  onClick={() => void resizeSelectedInstance(1.1)}
+                />
                 <Text>{selectedInstanceScalePercent}%</Text>
+                <Text>{selectedInstance.width} x {selectedInstance.height}px</Text>
               </div>
             )}
             {gridVisible && (
               <div className="map-studio-collision-layer" style={{ backgroundSize: `${gridSize}px ${gridSize}px` }}>
-                {collisionCells.map((cell) => (
-                  <span key={cellKey(cell.gridX, cell.gridY)} className="map-studio-collision-cell" style={{ left: cell.x, top: cell.y, width: cell.width, height: cell.height }} />
+                  {collisionCells.map((cell) => (
+                  <span key={collisionCellKey(cell)} className="map-studio-collision-cell" style={{ left: cell.x, top: cell.y, width: cell.width, height: cell.height }} />
                 ))}
               </div>
             )}

@@ -1,13 +1,14 @@
-"""FastAPI 主应用"""
+﻿"""FastAPI application for Droi-Game-Tool."""
 import asyncio
 import io
 import json
 import os
+import shutil
 import sys
 import threading
 from pathlib import Path
 
-# 确保项目根目录在 path 中
+# Ensure the project root is importable for worker modules.
 ROOT = Path(__file__).resolve().parent.parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -37,9 +38,9 @@ from .qwen_provider import (
 )
 
 ALLOWED_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
-MAX_IMAGE_MB = 20
+MAX_IMAGE_MB = MAX_UPLOAD_SIZE_MB
 
-# Worker 与 API 共享存储路径
+# API and worker share the same storage roots.
 from .models import JobParams, JobResponse
 from .storage import (
     ensure_dirs,
@@ -50,7 +51,7 @@ from .storage import (
     save_uploaded_file,
 )
 
-# 任务状态存储（生产环境应使用 Redis）
+# In-memory job stores. Production should move this state to Redis or a database.
 _jobs: dict[str, dict] = {}
 _watermark_jobs: dict[str, dict] = {}
 _character_action_jobs: dict[str, dict] = {}
@@ -232,13 +233,13 @@ def _set_character_action_job(job_id: str, **kwargs):
 
 
 def _update_job(job_id: str, **kwargs):
-    """更新任务"""
+    """Update an in-memory video processing job."""
     if job_id in _jobs:
         _jobs[job_id].update(kwargs)
 
 
 def _run_pipeline_sync(job_id: str, video_path: str):
-    """同步模式：在后台线程中执行管线（Windows 无 Redis 时使用）"""
+    """Run the video frame pipeline in a background thread when RQ is unavailable."""
     try:
         from worker.processor import run_pipeline
         result = run_pipeline(job_id, video_path, str(OUTPUT_DIR), str(TEMP_DIR), _jobs[job_id]["params"])
@@ -248,7 +249,7 @@ def _run_pipeline_sync(job_id: str, video_path: str):
 
 
 def _run_watermark_sync(job_id: str, video_path: str):
-    """同步模式：在后台线程中执行水印去除"""
+    """Run watermark cleanup in a background thread when RQ is unavailable."""
     def _update_wm(jid: str, **kwargs):
         if jid in _watermark_jobs:
             _watermark_jobs[jid].update(kwargs)
@@ -525,7 +526,7 @@ def _run_character_action_analysis(job_id: str, content: bytes, params: dict):
 app = FastAPI(
     title="Droi-game-tool API",
     version="1.6",
-    description="上传视频后自动提取帧、抠图处理，生成序列帧 Sprite Sheet",
+    description="Upload video, extract frames, run matte processing, and generate sprite sheets.",
 )
 
 app.add_middleware(
@@ -538,7 +539,7 @@ app.add_middleware(
 
 
 def _init_job(job_id: str, params: JobParams, rq_job_id: str = ""):
-    """初始化任务记录"""
+    """Initialize an in-memory video frame job."""
     _jobs[job_id] = {
         "id": job_id,
         "status": "queued",
@@ -570,36 +571,44 @@ async def health():
     return {"ok": True}
 
 
+def upload_limit_error() -> str:
+    return (
+        f"Upload is limited by the server to {MAX_UPLOAD_SIZE_MB}MB. "
+        "The browser UI does not apply an extra client-side file-size cap; "
+        "raise MAX_UPLOAD_SIZE_MB or use chunked/local processing for larger media."
+    )
+
+
 @app.post("/jobs", response_model=dict)
 async def create_job(
     file: UploadFile = File(None),
     params: str = Form(default="{}"),
 ):
-    """
-    创建任务。上传视频文件或提供 URL（URL 可选实现）。
-    """
+    """Create a video frame extraction job from an uploaded video."""
+
+
     job_id = generate_job_id()
 
     try:
         params_obj = JobParams.model_validate_json(params)
     except Exception as e:
-        raise HTTPException(400, f"参数解析失败: {e}")
+        raise HTTPException(400, f"Parameter parse failed: {e}")
 
     if not file:
-        raise HTTPException(400, "请上传视频文件")
+        raise HTTPException(400, "Please upload a video file")
 
     ext = Path(file.filename or "").suffix.lower()
     if ext not in ALLOWED_VIDEO_EXTENSIONS:
-        raise HTTPException(400, f"不支持的格式，仅支持: {', '.join(ALLOWED_VIDEO_EXTENSIONS)}")
+        raise HTTPException(400, f"Unsupported format. Supported formats: {', '.join(ALLOWED_VIDEO_EXTENSIONS)}")
 
     content = await file.read()
     if len(content) > MAX_UPLOAD_SIZE_MB * 1024 * 1024:
-        raise HTTPException(400, f"文件过大，限制 {MAX_UPLOAD_SIZE_MB}MB")
+        raise HTTPException(400, upload_limit_error())
 
     save_uploaded_file(job_id, file.filename or "video.mp4", content)
     video_path = get_video_path(job_id)
     if not video_path:
-        raise HTTPException(500, "保存视频失败")
+        raise HTTPException(500, "Failed to save uploaded video")
 
     _init_job(job_id, params_obj)
 
@@ -614,7 +623,7 @@ async def create_job(
         )
         _update_job(job_id, rq_job_id=rq_id)
     except Exception as e:
-        # Windows 无 Redis 或 RQ 不支持时，使用同步模式在后台线程执行
+        # Fall back to an in-process background thread when Redis or RQ is unavailable.
         _update_job(job_id, status="processing", rq_job_id="")
         thread = threading.Thread(target=_run_pipeline_sync, args=(job_id, str(video_path)))
         thread.daemon = True
@@ -623,11 +632,75 @@ async def create_job(
     return {"job_id": job_id}
 
 
+@app.post("/jobs/preview-frame")
+async def preview_job_frame(
+    file: UploadFile = File(None),
+    params: str = Form(default="{}"),
+):
+    """Preview one processed video frame with the same matte settings used by frame jobs."""
+    try:
+        params_obj = JobParams.model_validate_json(params)
+    except Exception as e:
+        raise HTTPException(400, f"Parameter parse failed: {e}")
+
+    if not file:
+        raise HTTPException(400, "Please upload a video file")
+
+    ext = Path(file.filename or "").suffix.lower()
+    if ext not in ALLOWED_VIDEO_EXTENSIONS:
+        raise HTTPException(400, f"Unsupported format. Supported formats: {', '.join(ALLOWED_VIDEO_EXTENSIONS)}")
+
+    content = await file.read()
+    if len(content) > MAX_UPLOAD_SIZE_MB * 1024 * 1024:
+        raise HTTPException(400, upload_limit_error())
+
+    preview_id = f"preview_{generate_job_id()}"
+    preview_dir = TEMP_DIR / preview_id
+    frames_dir = preview_dir / "frames"
+    output_dir = preview_dir / "output"
+    preview_dir.mkdir(parents=True, exist_ok=True)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    video_path = preview_dir / (Path(file.filename or "video.mp4").name or "video.mp4")
+    output_path = output_dir / "preview.png"
+    try:
+        video_path.write_bytes(content)
+        from worker.processor import extract_frames, process_frame
+
+        start_sec = params_obj.frame_range.start_sec or 0
+        fps = max(1, params_obj.fps or 12)
+        extracted = extract_frames(
+            video_path,
+            frames_dir,
+            fps=fps,
+            start_sec=start_sec,
+            end_sec=start_sec + (1 / fps),
+            max_frames=1,
+        )
+        if not extracted:
+            raise HTTPException(400, "No frame extracted for preview")
+        process_frame(
+            extracted[0][0],
+            output_path,
+            params_obj.target_size.w,
+            params_obj.target_size.h,
+            params_obj.padding,
+            params_obj.bg_color,
+            params_obj.transparent,
+            params_obj.crop_mode,
+            params_obj.matte_strength,
+            params_obj.model_dump(),
+        )
+        return Response(output_path.read_bytes(), media_type="image/png")
+    finally:
+        shutil.rmtree(preview_dir, ignore_errors=True)
+
+
 @app.get("/jobs/{job_id}", response_model=dict)
 async def get_job(job_id: str):
-    """查询任务状态"""
+    """Return the current status of a video frame job."""
     if job_id not in _jobs:
-        raise HTTPException(404, "任务不存在")
+        raise HTTPException(404, "Job not found")
 
     job = _jobs[job_id]
     resp = {
@@ -639,7 +712,7 @@ async def get_job(job_id: str):
         "result": job.get("result"),
     }
 
-    # 若内存状态为 queued/processing，尝试从 RQ 拉取最新状态
+    # Pull latest state from RQ for queued or processing jobs when possible.
     if job["status"] in ("queued", "processing") and job.get("rq_job_id"):
         try:
             from worker.tasks import get_job_status
@@ -662,35 +735,51 @@ async def get_job(job_id: str):
 
 @app.get("/jobs/{job_id}/result")
 async def get_result(job_id: str, format: str = "png"):
-    """下载结果：png 或 zip"""
+    """Download generated sprite sheet PNG or ZIP."""
     if job_id not in _jobs:
-        raise HTTPException(404, "任务不存在")
+        raise HTTPException(404, "Job not found")
     if _jobs[job_id]["status"] != "completed":
-        raise HTTPException(400, "任务未完成")
+        raise HTTPException(400, "Job is not completed")
 
     paths = get_result_paths(job_id)
     if not paths:
-        raise HTTPException(404, "结果文件不存在")
+        raise HTTPException(404, "Result file not found")
 
     sprite_path, index_path = paths
     if format == "zip":
         import zipfile
         zip_path = OUTPUT_DIR / job_id / "result.zip"
+        frame_dir = OUTPUT_DIR / job_id / "frames"
         with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
             zf.write(sprite_path, "sprite.png")
             zf.write(index_path, "index.json")
+            if frame_dir.exists():
+                for frame_path in sorted(frame_dir.glob("*.png")):
+                    zf.write(frame_path, f"frames/{frame_path.name}")
         return FileResponse(zip_path, filename="sprite_sheet.zip", media_type="application/zip")
     return FileResponse(sprite_path, filename="sprite.png", media_type="image/png")
 
 
 @app.get("/jobs/{job_id}/index")
 async def get_index(job_id: str):
-    """获取索引 JSON"""
+    """Download the generated JSON frame index."""
     paths = get_result_paths(job_id)
     if not paths:
-        raise HTTPException(404, "结果不存在")
+        raise HTTPException(404, "Result file not found")
     _, index_path = paths
     return FileResponse(index_path, media_type="application/json")
+
+
+@app.get("/jobs/{job_id}/frames/{frame_name}")
+async def get_job_frame(job_id: str, frame_name: str):
+    """Download one processed frame PNG for direct timeline import."""
+    safe_name = Path(frame_name).name
+    if safe_name != frame_name or not safe_name.lower().endswith(".png"):
+        raise HTTPException(400, "Invalid frame name")
+    frame_path = OUTPUT_DIR / job_id / "frames" / safe_name
+    if not frame_path.exists():
+        raise HTTPException(404, "Frame not found")
+    return FileResponse(frame_path, filename=safe_name, media_type="image/png")
 
 
 def _run_matte_sync(content: bytes) -> bytes:
@@ -701,6 +790,8 @@ def _run_matte_sync(content: bytes) -> bytes:
             return remove_background_with_gemini(content)
         except GeminiProviderError as e:
             gemini_error = e.message
+        except Exception as e:
+            gemini_error = str(e)
     from rembg import remove
     from worker.processor import _get_session
     try:
@@ -796,7 +887,7 @@ async def create_character_action_analysis_job(
 
 @app.get("/character-action/analyze/{job_id}")
 async def get_character_action_analysis_job(job_id: str):
-    """查询人物动作 AI 分析任务状态"""
+    """Return the status of a character action AI analysis job."""
     job = _get_character_action_job(job_id)
     if not job:
         raise HTTPException(404, "AI analysis job not found")
@@ -812,7 +903,7 @@ async def get_character_action_analysis_job(job_id: str):
 
 @app.get("/character-action/analyze/{job_id}/result")
 async def get_character_action_analysis_result(job_id: str):
-    """获取人物动作 AI 分析候选图清单"""
+    """Return generated character action candidate metadata."""
     job = _get_character_action_job(job_id)
     if not job:
         raise HTTPException(404, "AI analysis job not found")
@@ -823,7 +914,7 @@ async def get_character_action_analysis_result(job_id: str):
 
 @app.get("/character-action/analyze/{job_id}/assets/{filename}")
 async def get_character_action_analysis_asset(job_id: str, filename: str):
-    """读取人物动作 AI 分析候选 PNG"""
+    """Download one generated character action candidate PNG."""
     job = _get_character_action_job(job_id)
     if not job:
         raise HTTPException(404, "AI analysis job not found")
@@ -838,26 +929,26 @@ async def get_character_action_analysis_asset(job_id: str, filename: str):
 
 @app.post("/watermark")
 async def create_watermark_job(file: UploadFile = File(...)):
-    """
-    创建 Seedance 水印去除任务。上传视频，返回 job_id，轮询 GET /watermark/{id} 获取状态。
-    """
+    """Create a Seedance watermark cleanup job from an uploaded video."""
+
+
     job_id = generate_job_id()
 
     if not file.filename:
-        raise HTTPException(400, "请上传视频文件")
+        raise HTTPException(400, "Please upload a video file")
 
     ext = Path(file.filename or "").suffix.lower()
     if ext not in ALLOWED_VIDEO_EXTENSIONS:
-        raise HTTPException(400, f"不支持的格式，仅支持: {', '.join(ALLOWED_VIDEO_EXTENSIONS)}")
+        raise HTTPException(400, f"Unsupported format. Supported formats: {', '.join(ALLOWED_VIDEO_EXTENSIONS)}")
 
     content = await file.read()
     if len(content) > MAX_UPLOAD_SIZE_MB * 1024 * 1024:
-        raise HTTPException(400, f"文件过大，限制 {MAX_UPLOAD_SIZE_MB}MB")
+        raise HTTPException(400, upload_limit_error())
 
     save_uploaded_file(job_id, file.filename or "video.mp4", content)
     video_path = get_video_path(job_id)
     if not video_path:
-        raise HTTPException(500, "保存视频失败")
+        raise HTTPException(500, "Failed to save uploaded video")
 
     _watermark_jobs[job_id] = {
         "id": job_id,
@@ -884,9 +975,9 @@ async def create_watermark_job(file: UploadFile = File(...)):
 
 @app.get("/watermark/{job_id}")
 async def get_watermark_job(job_id: str):
-    """查询水印去除任务状态"""
+    """Return the current status of a watermark cleanup job."""
     if job_id not in _watermark_jobs:
-        raise HTTPException(404, "任务不存在")
+        raise HTTPException(404, "Job not found")
 
     job = _watermark_jobs[job_id]
     resp = {
@@ -922,11 +1013,11 @@ async def get_watermark_job(job_id: str):
 
 @app.get("/watermark/{job_id}/result")
 async def get_watermark_result(job_id: str):
-    """下载去水印后的视频"""
+    """Download the cleaned watermark-removal video."""
     if job_id not in _watermark_jobs:
-        raise HTTPException(404, "任务不存在")
+        raise HTTPException(404, "Job not found")
     if _watermark_jobs[job_id]["status"] != "completed":
-        raise HTTPException(400, "任务未完成")
+        raise HTTPException(400, "Job is not completed")
 
     job = _watermark_jobs[job_id]
     out_path = None
@@ -937,14 +1028,14 @@ async def get_watermark_result(job_id: str):
     if not out_path:
         out_path = get_watermark_output_path(job_id)
     if not out_path:
-        raise HTTPException(404, "结果文件不存在")
+        raise HTTPException(404, "Result file not found")
 
     return FileResponse(out_path, filename="clean.mp4", media_type="video/mp4")
 
 
 @app.delete("/watermark/{job_id}")
 async def delete_watermark_job(job_id: str):
-    """删除水印去除任务及结果"""
+    """Delete a watermark cleanup job and its generated files."""
     if job_id in _watermark_jobs:
         del _watermark_jobs[job_id]
     import shutil
@@ -957,7 +1048,7 @@ async def delete_watermark_job(job_id: str):
 
 @app.delete("/jobs/{job_id}")
 async def delete_job(job_id: str):
-    """删除任务及结果"""
+    """Delete a video frame job and its generated files."""
     if job_id in _jobs:
         del _jobs[job_id]
     import shutil
@@ -968,5 +1059,5 @@ async def delete_job(job_id: str):
     return {"ok": True}
 
 
-# 后台轮询更新：需要 worker 完成后更新 _jobs。可通过 RQ 的失败/成功回调实现。
-# 此处简化：GET /jobs/{id} 时主动查 RQ。
+# Background polling note: in production, workers should update persisted job state directly.
+# For this local tool, GET endpoints opportunistically pull the latest RQ state.

@@ -1,0 +1,344 @@
+.ai-bg-page {
+  position: relative;
+  inset: auto;
+  z-index: auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 620px;
+  overflow: hidden;
+  color: #fff;
+  border: 1px solid rgba(116, 229, 255, 0.16);
+  border-radius: 8px;
+  background:
+    linear-gradient(180deg, rgba(16, 22, 47, 0.88), rgba(8, 12, 27, 0.92)),
+    rgba(8, 12, 27, 0.92);
+}
+
+.ai-bg-page * {
+  box-sizing: border-box;
+}
+
+.ai-bg-scanline {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(rgba(255, 255, 255, 0.024) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(116, 229, 255, 0.035) 1px, transparent 1px);
+  background-size: 64px 64px;
+}
+
+.ai-bg-header {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 20px;
+  align-items: center;
+  padding: 22px 28px 14px;
+}
+
+.ai-bg-back.ant-btn,
+.ai-bg-page .ant-btn {
+  min-height: 40px;
+  color: #dce8ff;
+  border-color: rgba(116, 229, 255, 0.24);
+  background: rgba(255, 255, 255, 0.055);
+}
+
+.ai-bg-primary.ant-btn {
+  color: #e9fbff;
+  font-weight: 850;
+  border-color: rgba(116, 229, 255, 0.52);
+  background: rgba(116, 229, 255, 0.16);
+}
+
+.ai-bg-kicker.ant-typography,
+.ai-bg-section.ant-typography {
+  display: block;
+  color: #74e5ff;
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.ai-bg-header h1.ant-typography {
+  margin: 3px 0 0;
+  color: #fff;
+  font-size: clamp(28px, 3.3vw, 42px);
+  line-height: 1.05;
+}
+
+.ai-bg-subtitle.ant-typography {
+  display: block;
+  margin-top: 8px;
+  color: #aeb4cf;
+}
+
+.ai-bg-layout {
+  position: relative;
+  z-index: 1;
+  min-height: 0;
+  flex: 1;
+  display: grid;
+  grid-template-columns: 360px minmax(0, 1fr);
+  gap: 16px;
+  padding: 0 24px 24px;
+}
+
+.ai-bg-page.is-embedded-panel .ai-bg-layout {
+  padding: 14px;
+}
+
+.ai-bg-sidebar,
+.ai-bg-stage {
+  min-height: 0;
+  overflow: auto;
+  border: 1px solid rgba(116, 229, 255, 0.18);
+  border-radius: 8px;
+  background: rgba(10, 16, 36, 0.72);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.ai-bg-sidebar {
+  display: grid;
+  align-content: start;
+  gap: 14px;
+  padding: 16px;
+}
+
+.ai-bg-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.ai-bg-local-settings {
+  display: grid;
+  gap: 9px;
+  padding: 10px;
+  border: 1px solid rgba(116, 229, 255, 0.14);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.ai-bg-field {
+  display: grid;
+  gap: 5px;
+  color: #aeb4cf;
+  font-size: 11px;
+  font-weight: 850;
+}
+
+.ai-bg-field .ant-input-number {
+  width: 100%;
+}
+
+.ai-bg-color-row {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.ai-bg-preset-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.ai-bg-color-row input[type='color'] {
+  width: 44px;
+  height: 34px;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid rgba(116, 229, 255, 0.28);
+  border-radius: 6px;
+  background: transparent;
+}
+
+.ai-bg-color-row code {
+  min-width: 0;
+  overflow: hidden;
+  color: #dce8ff;
+  text-overflow: ellipsis;
+}
+
+.ai-bg-switch-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  color: #cbd8f4;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.ai-bg-drop {
+  min-height: 160px;
+  display: grid;
+  place-items: center;
+  gap: 8px;
+  padding: 18px;
+  color: #e6f7ff;
+  border: 1px dashed rgba(116, 229, 255, 0.42);
+  border-radius: 8px;
+  background: rgba(116, 229, 255, 0.07);
+  cursor: pointer;
+}
+
+.ai-bg-drop svg {
+  font-size: 30px;
+}
+
+.ai-bg-drop span,
+.ai-bg-empty.ant-typography {
+  color: #aeb4cf;
+  font-size: 13px;
+  text-align: center;
+}
+
+.ai-bg-list {
+  min-height: 0;
+}
+
+.ai-bg-asset {
+  display: grid;
+  grid-template-columns: 54px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  width: 100%;
+  padding: 8px;
+  color: #fff;
+  text-align: left;
+  border: 1px solid rgba(116, 229, 255, 0.14);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  cursor: pointer;
+}
+
+.ai-bg-asset.is-active {
+  border-color: rgba(116, 229, 255, 0.58);
+  background: rgba(116, 229, 255, 0.12);
+}
+
+.ai-bg-asset img {
+  width: 54px;
+  height: 54px;
+  object-fit: contain;
+  border-radius: 6px;
+  background:
+    linear-gradient(45deg, #233 25%, transparent 25%),
+    linear-gradient(-45deg, #233 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #233 75%),
+    linear-gradient(-45deg, transparent 75%, #233 75%);
+  background-size: 14px 14px;
+  background-position: 0 0, 0 7px, 7px -7px, -7px 0;
+}
+
+.ai-bg-asset strong,
+.ai-bg-asset small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ai-bg-asset small {
+  color: #aeb4cf;
+  margin-top: 4px;
+}
+
+.ai-bg-asset-error {
+  display: -webkit-box;
+  margin-top: 4px;
+  overflow: hidden;
+  color: #ff8aa1;
+  font-size: 11px;
+  font-style: normal;
+  line-height: 1.25;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.ai-bg-stage {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  padding: 16px;
+}
+
+.ai-bg-stage-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.ai-bg-preview-grid {
+  min-height: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.ai-bg-preview-grid article {
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 10px;
+}
+
+.ai-bg-preview {
+  min-height: 420px;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid rgba(116, 229, 255, 0.16);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.ai-bg-preview.is-checker {
+  background:
+    linear-gradient(45deg, rgba(255,255,255,.08) 25%, transparent 25%),
+    linear-gradient(-45deg, rgba(255,255,255,.08) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, rgba(255,255,255,.08) 75%),
+    linear-gradient(-45deg, transparent 75%, rgba(255,255,255,.08) 75%),
+    #152033;
+  background-size: 28px 28px;
+  background-position: 0 0, 0 14px, 14px -14px, -14px 0;
+}
+
+.ai-bg-preview.is-dark {
+  background: #050914;
+}
+
+.ai-bg-preview.is-light {
+  background: #e8eef7;
+}
+
+.ai-bg-preview img {
+  max-width: 92%;
+  max-height: 92%;
+  image-rendering: pixelated;
+  object-fit: contain;
+}
+
+.ai-bg-preview span,
+.ai-bg-processing {
+  color: #aeb4cf;
+}
+
+.ai-bg-processing {
+  display: grid;
+  place-items: center;
+  gap: 10px;
+}
+
+@media (max-width: 980px) {
+  .ai-bg-layout,
+  .ai-bg-preview-grid {
+    grid-template-columns: 1fr;
+  }
+}

@@ -1,7 +1,8 @@
 export const OBSTACLE_GRID_SIZES = [8, 16, 24, 32, 48, 64, 96, 128] as const
 
 export type ObstacleGridSize = typeof OBSTACLE_GRID_SIZES[number]
-export type CollisionTool = 'select' | 'paint' | 'erase'
+export type CollisionTool = 'select' | 'paint' | 'collision' | 'erase'
+export type CollisionBlockMode = 'playerOnlyBoundary' | 'allEntityObstacle'
 
 export type LoadedImage = {
   file: File
@@ -21,13 +22,18 @@ export type ObstacleInstance = {
   id: string
   assetId: string
   assetName: string
+  gridX?: number
+  gridY?: number
   x: number
   y: number
   width: number
   height: number
+  scale?: number
   rotation: number
   opacity: number
   collisionMode: 'solid'
+  collisionType?: 'solid' | 'decoration' | 'damage' | 'none'
+  layer?: number
 }
 
 export type CollisionCell = {
@@ -38,6 +44,7 @@ export type CollisionCell = {
   width: number
   height: number
   sourceInstanceId?: string
+  blockMode?: CollisionBlockMode
 }
 
 export type ObstacleExportJson = {
@@ -45,9 +52,22 @@ export type ObstacleExportJson = {
   gridSize: number
   mapWidth: number
   mapHeight: number
+  collisionRule: {
+    blockMode: CollisionBlockMode
+    affects: 'player' | 'allEntities'
+    ignoredByTags: string[]
+  }
+  assets: Array<{
+    id: string
+    name: string
+    width: number
+    height: number
+  }>
   obstacles: Array<ObstacleInstance & {
+    gridX: number
+    gridY: number
     collision: {
-      type: 'solid'
+      type: 'solid' | 'decoration' | 'damage' | 'none'
       x: number
       y: number
       width: number
@@ -63,6 +83,10 @@ export function makeId(prefix: string): string {
 
 export function cellKey(gridX: number, gridY: number): string {
   return `${gridX},${gridY}`
+}
+
+export function collisionCellKey(cell: CollisionCell): string {
+  return cell.sourceInstanceId ? `${cell.sourceInstanceId}:${cell.gridX},${cell.gridY}` : cellKey(cell.gridX, cell.gridY)
 }
 
 export function snapCellFromPixel(x: number, y: number, gridSize: number): { gridX: number; gridY: number } {
@@ -113,16 +137,20 @@ export function replaceCellsForInstance(
   cells: CollisionCell[],
   instanceId: string,
   nextCells: CollisionCell[],
+  erasedCellKeys: ReadonlySet<string> = new Set(),
 ): CollisionCell[] {
   const manualCells = cells.filter((cell) => cell.sourceInstanceId !== instanceId)
   const merged = new Map<string, CollisionCell>()
-  for (const cell of manualCells) merged.set(cellKey(cell.gridX, cell.gridY), cell)
-  for (const cell of nextCells) merged.set(cellKey(cell.gridX, cell.gridY), cell)
+  for (const cell of manualCells) merged.set(collisionCellKey(cell), cell)
+  for (const cell of nextCells) {
+    const key = cellKey(cell.gridX, cell.gridY)
+    if (!erasedCellKeys.has(key)) merged.set(collisionCellKey(cell), cell)
+  }
   return Array.from(merged.values()).sort((a, b) => a.gridY - b.gridY || a.gridX - b.gridX)
 }
 
 export function upsertManualCell(cells: CollisionCell[], nextCell: CollisionCell): CollisionCell[] {
-  const next = new Map(cells.map((cell) => [cellKey(cell.gridX, cell.gridY), cell]))
+  const next = new Map(cells.map((cell) => [collisionCellKey(cell), cell]))
   next.set(cellKey(nextCell.gridX, nextCell.gridY), nextCell)
   return Array.from(next.values()).sort((a, b) => a.gridY - b.gridY || a.gridX - b.gridX)
 }

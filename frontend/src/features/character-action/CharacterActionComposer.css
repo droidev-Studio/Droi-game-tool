@@ -1024,6 +1024,26 @@
   font-size: 13px;
 }
 
+.character-action-empty-upload.ant-btn {
+  justify-self: center;
+  min-width: 220px;
+  min-height: 48px;
+  margin-top: 18px;
+  color: #06111d;
+  border-color: rgba(133, 232, 255, 0.86);
+  background: linear-gradient(180deg, #80e8ff 0%, #50c3e0 100%);
+  box-shadow: 0 16px 36px rgba(80, 195, 224, 0.26);
+  font-weight: 900;
+}
+
+.character-action-empty-upload.ant-btn:hover,
+.character-action-empty-upload.ant-btn:focus-visible {
+  color: #031018;
+  border-color: #c4f7ff;
+  background: linear-gradient(180deg, #a1f2ff 0%, #62d5ef 100%);
+  box-shadow: 0 18px 42px rgba(98, 213, 239, 0.34);
+}
+
 .character-action-layer {
   position: absolute;
   display: grid;
@@ -1607,6 +1627,31 @@
 
 .character-action-page .ant-empty-img-simple-path {
   stroke: rgba(116, 229, 255, 0.28);
+}
+
+.character-action-page .game-tool-switch .ant-btn {
+  min-height: 34px;
+  color: rgba(220, 232, 255, 0.78);
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.character-action-page .game-tool-switch .ant-btn:hover,
+.character-action-page .game-tool-switch .ant-btn:focus-visible {
+  color: #ffffff !important;
+  background: rgba(116, 229, 255, 0.12) !important;
+}
+
+.character-action-page .game-tool-switch .ant-btn.is-active {
+  color: #ffffff;
+  background:
+    linear-gradient(180deg, rgba(116, 229, 255, 0.28), rgba(116, 229, 255, 0.12)),
+    rgba(9, 28, 50, 0.82);
+  box-shadow:
+    0 0 0 1px rgba(116, 229, 255, 0.28),
+    0 10px 26px rgba(0, 0, 0, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.18);
 }
 
 .character-action-select-popup {

@@ -761,7 +761,7 @@ export default function SpriteSheetAdjust({ integratedSplit = false }: SpriteShe
     if (frameUrls.length === 0) return
     try {
       const zip = new JSZip()
-      const base = file?.name.replace(/\.[^.]+$/, '').replace(/[^\w\-]+/g, '_') || 'frames'
+      const base = file?.name.replace(/\.[^.]+$/, '').replace(/[^\w-]+/g, '_') || 'frames'
       for (let i = 0; i < frameUrls.length; i++) {
         const blob = await fetch(frameUrls[i]!).then((r) => r.blob())
         zip.file(`frame_${String(i).padStart(3, '0')}.png`, blob)
@@ -974,7 +974,9 @@ export default function SpriteSheetAdjust({ integratedSplit = false }: SpriteShe
     try {
       const imgData = canvas.getContext('2d')!.getImageData(srcX, srcY, fixedPixelRange, fixedPixelRange)
       setFixedPixelFixes((prev) => [...prev, { imgX, imgY, range: fixedPixelRange, data: new Uint8ClampedArray(imgData.data) }])
-    } catch (_) {}
+    } catch {
+      // Ignore failed pixel reads from transient canvas state.
+    }
   }
 
   const selectedIndices = frameUrls.map((_, i) => i).filter((i) => selected[i])

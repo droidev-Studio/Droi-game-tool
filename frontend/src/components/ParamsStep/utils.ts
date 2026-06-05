@@ -1,7 +1,7 @@
-/** 工具函数：帧处理、画布、抠图等 */
+﻿/** 宸ュ叿鍑芥暟锛氬抚澶勭悊銆佺敾甯冦€佹姞鍥剧瓑 */
 import { resizeImageToBlobCanvasLegacy } from './utilsResizeCanvasLegacy'
 
-/** 裁切图片：按 left/top/right/bottom 裁掉边缘 */
+/** 瑁佸垏鍥剧墖锛氭寜 left/top/right/bottom 瑁佹帀杈圭紭 */
 export async function cropImageBlob(
   blob: Blob,
   crop: { left: number; top: number; right: number; bottom: number }
@@ -32,7 +32,7 @@ export async function cropImageBlob(
   })
 }
 
-/** 单图缩放：按比例缩放至目标尺寸内，居中放置。pixelated=true 时使用 PS 风格最近邻（硬边缘）；false 时平滑缩放 */
+/** 鍗曞浘缂╂斁锛氭寜姣斾緥缂╂斁鑷崇洰鏍囧昂瀵稿唴锛屽眳涓斁缃€俻ixelated=true 鏃朵娇鐢?PS 椋庢牸鏈€杩戦偦锛堢‖杈圭紭锛夛紱false 鏃跺钩婊戠缉鏀?*/
 export async function resizeImageToBlob(
   blob: Blob,
   targetW: number,
@@ -47,9 +47,9 @@ export async function resizeImageToBlob(
 }
 
 /**
- * PS 风格硬缩放：逐像素最近邻采样，模仿 Photoshop「邻近（硬边缘）」重采样。
- * Canvas drawImage + imageSmoothingEnabled=false 在 1024→192 等非整数倍缩小时会模糊，
- * 本函数使用 ImageData 手动采样，保证边缘锐利。
+ * PS 椋庢牸纭缉鏀撅細閫愬儚绱犳渶杩戦偦閲囨牱锛屾ā浠?Photoshop銆岄偦杩戯紙纭竟缂橈級銆嶉噸閲囨牱銆?
+ * Canvas drawImage + imageSmoothingEnabled=false 鍦?1024鈫?92 绛夐潪鏁存暟鍊嶇缉灏忔椂浼氭ā绯婏紝
+ * 鏈嚱鏁颁娇鐢?ImageData 鎵嬪姩閲囨牱锛屼繚璇佽竟缂橀攼鍒┿€?
  */
 export async function resizeImageToBlobNearestNeighborPS(
   blob: Blob,
@@ -125,8 +125,9 @@ export async function resizeImageToBlobNearestNeighborPS(
   })
 }
 
-/** 图片按3行切分，行高=h/3。将第3行下移1行高度，第2行复制到第3行位置并水平翻转。输出高度 = h + rowHeight */
+/** 鍥剧墖鎸?琛屽垏鍒嗭紝琛岄珮=h/3銆傚皢绗?琛屼笅绉?琛岄珮搴︼紝绗?琛屽鍒跺埌绗?琛屼綅缃苟姘村钩缈昏浆銆傝緭鍑洪珮搴?= h + rowHeight */
 export async function extendImageBottom(blob: Blob, _bottomPx: number): Promise<Blob> {
+  void _bottomPx
   const img = await (typeof createImageBitmap === 'function'
     ? createImageBitmap(blob)
     : new Promise<HTMLImageElement>((resolve, reject) => {
@@ -155,120 +156,6 @@ export async function extendImageBottom(blob: Blob, _bottomPx: number): Promise<
   ctx.drawImage(img, 0, 2 * rowH, w, rowH, 0, 3 * rowH, w, rowH)
   return new Promise((resolve, reject) => {
     canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('ERR_TOBLOB'))), 'image/png', 0.95)
-  })
-}
-
-/** 古装全动作：256x256 → 4x4 切分 → 每格加边 → 按规则重排 */
-export async function processAncientCostumeAllActions(blob: Blob): Promise<Blob> {
-  const img = await (typeof createImageBitmap === 'function'
-    ? createImageBitmap(blob)
-    : new Promise<HTMLImageElement>((resolve, reject) => {
-        const im = new Image()
-        const url = URL.createObjectURL(blob)
-        im.onload = () => { URL.revokeObjectURL(url); resolve(im) }
-        im.onerror = () => { URL.revokeObjectURL(url); reject(new Error('ERR_IMAGE_LOAD')) }
-        im.src = url
-      }))
-  if (img.width !== 256 || img.height !== 256) {
-    throw new Error('processAncientCostumeAllActions expects 256x256 input')
-  }
-  const cellSize = 64
-  const pad = { top: 34, bottom: 30, left: 32, right: 32 }
-  const outCellW = cellSize + pad.left + pad.right
-  const outCellH = cellSize + pad.top + pad.bottom
-
-  const getCell = (row: number, col: number) => {
-    const canvas = document.createElement('canvas')
-    canvas.width = outCellW
-    canvas.height = outCellH
-    const ctx = canvas.getContext('2d')
-    if (!ctx) return canvas
-    const sx = col * cellSize
-    const sy = row * cellSize
-    ctx.drawImage(img, sx, sy, cellSize, cellSize, pad.left, pad.top, cellSize, cellSize)
-    return canvas
-  }
-
-  const flipH = (src: HTMLCanvasElement) => {
-    const c = document.createElement('canvas')
-    c.width = src.width
-    c.height = src.height
-    const ctx = c.getContext('2d')
-    if (!ctx) return c
-    ctx.save()
-    ctx.translate(c.width, 0)
-    ctx.scale(-1, 1)
-    ctx.drawImage(src, 0, 0, src.width, src.height, 0, 0, src.width, src.height)
-    ctx.restore()
-    return c
-  }
-
-  const cells: Record<string, HTMLCanvasElement> = {}
-  for (let r = 1; r <= 4; r++) {
-    for (let c = 1; c <= 4; c++) {
-      const key = `${r}K${c}`
-      cells[key] = getCell(r - 1, c - 1)
-    }
-  }
-
-  const outW = 1024
-  const outH = 7 * outCellH
-  const out = document.createElement('canvas')
-  out.width = outW
-  out.height = outH
-  const ctx = out.getContext('2d')
-  if (!ctx) throw new Error('ERR_CANVAS_CREATE')
-  ctx.clearRect(0, 0, outW, outH)
-
-  let y = 0
-  const draw = (key: string, flipped: boolean, count: number, xStart = 0) => {
-    const c = flipped ? flipH(cells[key]!) : cells[key]!
-    for (let i = 0; i < count; i++) {
-      ctx.drawImage(c, xStart + i * outCellW, y, outCellW, outCellH)
-    }
-  }
-
-  draw('2K4', false, 4)
-  draw('2K4', true, 4, 4 * outCellW)
-  y += outCellH
-  ctx.drawImage(cells['1K1']!, 0, y)
-  ctx.drawImage(cells['1K2']!, outCellW, y)
-  ctx.drawImage(cells['1K3']!, 2 * outCellW, y)
-  ctx.drawImage(cells['1K4']!, 3 * outCellW, y)
-  ctx.drawImage(cells['2K1']!, 4 * outCellW, y)
-  ctx.drawImage(cells['2K2']!, 5 * outCellW, y)
-  y += outCellH
-  ctx.drawImage(flipH(cells['1K1']!), 0, y)
-  ctx.drawImage(flipH(cells['1K2']!), outCellW, y)
-  ctx.drawImage(flipH(cells['1K3']!), 2 * outCellW, y)
-  ctx.drawImage(flipH(cells['1K4']!), 3 * outCellW, y)
-  ctx.drawImage(flipH(cells['2K1']!), 4 * outCellW, y)
-  ctx.drawImage(flipH(cells['2K2']!), 5 * outCellW, y)
-  y += outCellH
-  draw('4K4', false, 4)
-  draw('4K4', true, 4, 4 * outCellW)
-  y += outCellH
-  ctx.drawImage(cells['3K1']!, 0, y)
-  ctx.drawImage(cells['3K2']!, outCellW, y)
-  ctx.drawImage(cells['3K3']!, 2 * outCellW, y)
-  ctx.drawImage(cells['3K4']!, 3 * outCellW, y)
-  ctx.drawImage(cells['4K1']!, 4 * outCellW, y)
-  ctx.drawImage(cells['4K2']!, 5 * outCellW, y)
-  y += outCellH
-  ctx.drawImage(flipH(cells['3K1']!), 0, y)
-  ctx.drawImage(flipH(cells['3K2']!), outCellW, y)
-  ctx.drawImage(flipH(cells['3K3']!), 2 * outCellW, y)
-  ctx.drawImage(flipH(cells['3K4']!), 3 * outCellW, y)
-  ctx.drawImage(flipH(cells['4K1']!), 4 * outCellW, y)
-  ctx.drawImage(flipH(cells['4K2']!), 5 * outCellW, y)
-  y += outCellH
-  ctx.drawImage(cells['2K3']!, 0, y)
-  ctx.drawImage(flipH(cells['2K3']!), outCellW, y)
-  ctx.drawImage(cells['4K3']!, 2 * outCellW, y)
-  ctx.drawImage(flipH(cells['4K3']!), 3 * outCellW, y)
-
-  return new Promise((resolve, reject) => {
-    out.toBlob((b) => (b ? resolve(b) : reject(new Error('ERR_TOBLOB'))), 'image/png', 0.95)
   })
 }
 
@@ -301,7 +188,7 @@ export function resizeFrameToCanvas(
   return canvas
 }
 
-/** 将帧缩放至目标尺寸（与 resizeFrameToCanvas 逻辑一致），用于描边前缩小以加速 */
+/** 灏嗗抚缂╂斁鑷崇洰鏍囧昂瀵革紙涓?resizeFrameToCanvas 閫昏緫涓€鑷达級锛岀敤浜庢弿杈瑰墠缂╁皬浠ュ姞閫?*/
 export async function resizeFrameToBlob(
   blob: Blob,
   targetW: number,
@@ -541,7 +428,7 @@ export function applyBrushMask(
   })
 }
 
-/** 获取图片左上角像素的 RGB 颜色 */
+/** 鑾峰彇鍥剧墖宸︿笂瑙掑儚绱犵殑 RGB 棰滆壊 */
 export async function getTopLeftPixelColor(blob: Blob): Promise<{ r: number; g: number; b: number }> {
   const img = await (typeof createImageBitmap === 'function'
     ? createImageBitmap(blob)
@@ -608,8 +495,8 @@ export function applyChromaKey(
 }
 
 /**
- * ChromaKey 色度键：连续区域（与左上角连通）用 80 容差，非连续区域用 30 容差。
- * 取色仍为左上角第一像素。
+ * ChromaKey 鑹插害閿細杩炵画鍖哄煙锛堜笌宸︿笂瑙掕繛閫氾級鐢?80 瀹瑰樊锛岄潪杩炵画鍖哄煙鐢?30 瀹瑰樊銆?
+ * 鍙栬壊浠嶄负宸︿笂瑙掔涓€鍍忕礌銆?
  */
 export function applyChromaKeyHybridTolerance(
   dataUrl: string,
@@ -698,8 +585,8 @@ export function applyChromaKeyHybridTolerance(
 }
 
 /**
- * ChromaKey 自适应：非连续区域抠图时，若某区域像素数 > 20，该区域容差 +40。
- * 连续区域仍用 80 容差。
+ * ChromaKey 鑷€傚簲锛氶潪杩炵画鍖哄煙鎶犲浘鏃讹紝鑻ユ煇鍖哄煙鍍忕礌鏁?> 20锛岃鍖哄煙瀹瑰樊 +40銆?
+ * 杩炵画鍖哄煙浠嶇敤 80 瀹瑰樊銆?
  */
 export function applyChromaKeyAdaptiveRegion(
   dataUrl: string,
@@ -849,8 +736,8 @@ export function applyChromaKeyAdaptiveRegion(
 }
 
 /**
- * 基于左上角(0,0)像素的连通域去背：仅移除与第一行第一像素连通的同色区域，
- * 不会移除图像中间孤立的同色像素。
+ * 鍩轰簬宸︿笂瑙?0,0)鍍忕礌鐨勮繛閫氬煙鍘昏儗锛氫粎绉婚櫎涓庣涓€琛岀涓€鍍忕礌杩為€氱殑鍚岃壊鍖哄煙锛?
+ * 涓嶄細绉婚櫎鍥惧儚涓棿瀛ょ珛鐨勫悓鑹插儚绱犮€?
  */
 export function applyChromaKeyContiguousFromTopLeft(
   dataUrl: string,
@@ -860,7 +747,7 @@ export function applyChromaKeyContiguousFromTopLeft(
   tolerance: number,
   feather: number
 ): Promise<{ blob: Blob; dataUrl: string }> {
-  void feather // 保留参数与 applyChromaKey 一致
+  void feather // 淇濈暀鍙傛暟涓?applyChromaKey 涓€鑷?
   return new Promise((resolve, reject) => {
     const img = new Image()
     img.crossOrigin = 'anonymous'

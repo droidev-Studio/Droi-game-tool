@@ -86,7 +86,7 @@ export function clampAlphaCompositeForEdges(img: ImageData): ImageData {
     }
   }
   const top: [number, number, number][] = []
-  for (const [k, _] of [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8)) {
+  for (const [k] of [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8)) {
     const p = k.split(',').map(Number) as [number, number, number]
     top.push(p)
   }

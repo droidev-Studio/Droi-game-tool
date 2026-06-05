@@ -463,6 +463,7 @@ function makeId() {
 function sanitizeFileName(value: string | undefined, fallback: string) {
   const cleaned = String(value || '')
     .trim()
+    // eslint-disable-next-line no-control-regex
     .replace(/[<>:"/\\|?*\u0000-\u001f]/g, '-')
     .replace(/\s+/g, '-')
     .replace(/-+/g, '-')

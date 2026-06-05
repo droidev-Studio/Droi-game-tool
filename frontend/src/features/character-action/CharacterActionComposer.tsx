@@ -43,6 +43,7 @@ import {
 } from './characterActionModel'
 import { exportCharacterActionZip } from './characterActionExport'
 import {
+  blobToDataUrl,
   compareFileNamesByActionAndNumber,
   createCharacterFrameFromBlob,
   inferActionFromName,
@@ -52,6 +53,8 @@ import {
   revokeLayerAsset,
 } from './characterImageTools'
 import { useLanguage } from '../../i18n/context'
+import { DROI_GAME_TOOL_PROTOCOL, postToolHostMessage, type GameProjectContext } from '../../tools/toolHostBridge'
+import CharacterFrameImportPanel from './CharacterFrameImportPanel'
 import './CharacterActionComposer.css'
 
 const { Text, Title } = Typography
@@ -73,6 +76,10 @@ const characterActionTheme: ThemeConfig = {
 
 type CharacterActionComposerProps = {
   onBack: () => void
+  toolId?: string
+  embed?: boolean
+  projectId?: string | null
+  projectContext?: GameProjectContext | null
 }
 
 type DragState = {
@@ -83,6 +90,23 @@ const AI_ANALYSIS_PROCESSING = 'Analyzing character actions'
 const PROCESSING_BASE = 'Processing base character'
 const PROCESSING_FRAMES = 'Processing character frames'
 const PROCESSING_WEAPON = 'Processing weapon art'
+
+function droiTargetMetadata(projectContext: GameProjectContext | null | undefined, operation: string) {
+  const selectedTarget = projectContext?.selectedTarget
+  return {
+    targetItemId: selectedTarget?.itemId,
+    targetAssetPath: selectedTarget?.assetPath,
+    expectedArtifactType: selectedTarget?.expectedArtifactType,
+    operation,
+    sourceTool: 'Droi-Game-Tool',
+  }
+}
+
+function navigateTool(route: string) {
+  window.history.pushState({}, '', route)
+  window.dispatchEvent(new PopStateEvent('popstate'))
+}
+
 const PROCESSING_EFFECT = 'Processing attack effect'
 const PROCESSING_EXPORT = 'Packaging action assets'
 const DEFAULT_STAGE_ZOOM = 1.08
@@ -93,7 +117,7 @@ const characterCopy = {
   en: {
     back: 'Back Home',
     kicker: 'Droi-game-tool Character Action',
-    title: 'Character Action Pack Studio',
+    title: 'Character Action Pack Maker',
     subtitle: 'Build game-ready action packs from uploaded or AI-generated frames, with Godot SpriteFrames-style organization.',
     autoMatte: 'Auto background removal',
     exportActionPack: 'Export Action Pack',
@@ -199,7 +223,7 @@ const characterCopy = {
   zh: {
     back: '返回首页',
     kicker: 'Droi-game-tool 人物动作',
-    title: '人物动作包制作',
+    title: '角色动作包制作',
     subtitle: '从上传帧或 AI 生成帧制作游戏可用动作包，并按 Godot SpriteFrames 思路组织动作。',
     autoMatte: '自动抠图去背',
     exportActionPack: '导出动作包',
@@ -523,9 +547,19 @@ function buildMissingFramePlan(
   })
 }
 
-export default function CharacterActionComposer({ onBack }: CharacterActionComposerProps) {
+export default function CharacterActionComposer({
+  onBack,
+  toolId = 'character-action',
+  embed = false,
+  projectId,
+  projectContext = null,
+}: CharacterActionComposerProps) {
   const { lang } = useLanguage()
   const copy = characterCopy[lang]
+  const toolSwitchCopy = {
+    imageTool: lang === 'en' ? 'Image Processor' : lang === 'ja' ? '画像素材処理' : '图片素材处理',
+    actionTool: lang === 'en' ? 'Action Pack Maker' : lang === 'ja' ? 'アクションパック制作' : '角色动作包制作',
+  }
   const actionLabels = copy.actions
   const attachOptions = useMemo(
     () => Object.entries(copy.attach).map(([value, label]) => ({ value: value as AttachPoint, label })),
@@ -911,9 +945,9 @@ export default function CharacterActionComposer({ onBack }: CharacterActionCompo
     await runBaseModelAnalysis({ continueExisting: true })
   }
 
-  async function handleCharacterUpload(files: FileList | null) {
-    if (!files?.length) return
-    const nextFiles = Array.from(files)
+  async function processCharacterFrameFiles(files: File[]) {
+    if (!files.length) return
+    const nextFiles = files
       .filter((file) => file.type.startsWith('image/'))
       .sort(compareFileNamesByActionAndNumber)
     if (!nextFiles.length) return
@@ -935,6 +969,11 @@ export default function CharacterActionComposer({ onBack }: CharacterActionCompo
       setProcessing(null)
       if (characterInputRef.current) characterInputRef.current.value = ''
     }
+  }
+
+  async function handleCharacterUpload(files: FileList | null) {
+    if (!files?.length) return
+    await processCharacterFrameFiles(Array.from(files))
   }
 
   async function handleLayerUpload(files: FileList | null, target: LayerTarget) {
@@ -1133,7 +1172,7 @@ export default function CharacterActionComposer({ onBack }: CharacterActionCompo
     }
     setProcessing(PROCESSING_EXPORT)
     try {
-      await exportCharacterActionZip({
+      const exported = await exportCharacterActionZip({
         frames,
         weaponAssets,
         effectAssets,
@@ -1141,6 +1180,27 @@ export default function CharacterActionComposer({ onBack }: CharacterActionCompo
         actionConfigs,
         canvasSize: DEFAULT_CANVAS_SIZE,
       })
+      if (embed) {
+        postToolHostMessage({
+          type: 'droi.tool.exportArtifact.v1',
+          protocol: DROI_GAME_TOOL_PROTOCOL,
+          toolId,
+          artifact: {
+            toolId,
+            artifactType: 'actionPack',
+            files: [
+              {
+                name: 'character_action_package.zip',
+                mimeType: 'application/zip',
+                dataUrl: await blobToDataUrl(exported.blob),
+              },
+            ],
+            metadata: droiTargetMetadata(projectContext, 'export-character-action-pack'),
+            manifestPatch: exported.manifestPatch,
+            specPatch: { characterAction: exported.actionJson },
+          },
+        })
+      }
       message.success(copy.exportSuccess)
     } catch (error) {
       message.error(error instanceof Error ? error.message : copy.exportFailed)
@@ -1168,6 +1228,14 @@ export default function CharacterActionComposer({ onBack }: CharacterActionCompo
           </Text>
         </div>
         <div className="character-action-header-actions">
+          <div className="game-tool-switch">
+            <Button onClick={() => navigateTool('/tool/image-process')}>
+              {toolSwitchCopy.imageTool}
+            </Button>
+            <Button className="is-active" onClick={() => navigateTool('/tool/character-action')}>
+              {toolSwitchCopy.actionTool}
+            </Button>
+          </div>
           <span className="character-action-switch">
             <Text>{copy.autoMatte}</Text>
             <Switch checked={autoMatte} onChange={setAutoMatte} />
@@ -1275,13 +1343,21 @@ export default function CharacterActionComposer({ onBack }: CharacterActionCompo
                 {copy.scaleMode}
                 <Select
                   size="small"
-                  popupClassName="character-action-select-popup"
+                  classNames={{ popup: { root: 'character-action-select-popup' } }}
                   value={scaleMode}
                   options={scaleModeOptions}
                   onChange={setScaleMode}
                 />
               </label>
             </div>
+            <CharacterFrameImportPanel
+              disabled={Boolean(processing)}
+              toolId={toolId}
+              embed={embed}
+              projectId={projectId}
+              projectContext={projectContext}
+              onImportFrames={(files) => processCharacterFrameFiles(files)}
+            />
           </section>
 
           <section className="character-action-block">
@@ -1438,7 +1514,7 @@ export default function CharacterActionComposer({ onBack }: CharacterActionCompo
                     </button>
                     <Select
                       size="small"
-                      popupClassName="character-action-select-popup"
+                      classNames={{ popup: { root: 'character-action-select-popup' } }}
                       value={frame.action}
                       options={ACTION_NAMES.map((action) => ({ value: action, label: actionLabels[action] }))}
                       onChange={(value) => updateFrameAction(frame.id, value)}
@@ -1496,6 +1572,14 @@ export default function CharacterActionComposer({ onBack }: CharacterActionCompo
               <div className="character-action-empty-stage">
                 <strong>{copy.emptyStageTitle}</strong>
                 <span>{copy.emptyStageHint}</span>
+                <Button
+                  className="character-action-empty-upload"
+                  icon={<UploadOutlined />}
+                  loading={processing === PROCESSING_FRAMES}
+                  onClick={() => characterInputRef.current?.click()}
+                >
+                  {copy.uploadCharacterImages}
+                </Button>
               </div>
             )}
             {activeWeapon && activeVariant && (
@@ -1585,7 +1669,7 @@ export default function CharacterActionComposer({ onBack }: CharacterActionCompo
               <label>
                 {copy.attachPoint}
                 <Select
-                  popupClassName="character-action-select-popup"
+                  classNames={{ popup: { root: 'character-action-select-popup' } }}
                   value={selectedTransform.attachTo}
                   options={attachOptions}
                   onChange={(value) => updateTransform(selectedLayer, { attachTo: value })}

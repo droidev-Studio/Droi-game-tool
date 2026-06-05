@@ -10,3 +10,122 @@
   margin: 0;
   padding: 0;
 }
+
+.app-layout-droi.is-embedded-tool,
+.app-layout-droi.is-embedded-tool .app-content-droi {
+  min-height: 100vh;
+  background: #060b18;
+}
+
+.tool-runner {
+  min-height: 100vh;
+  background:
+    linear-gradient(90deg, rgba(116, 229, 255, 0.055) 1px, transparent 1px),
+    linear-gradient(0deg, rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+    linear-gradient(135deg, #060b18 0%, #10162f 58%, #140f1d 100%);
+  background-size: 72px 72px, 72px 72px, auto;
+  color: #fff;
+}
+
+.tool-runner-header {
+  width: min(1440px, calc(100% - 48px));
+  margin: 0 auto;
+  padding: 22px 0 6px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 18px;
+}
+
+.tool-runner-back {
+  border-color: rgba(116, 229, 255, 0.22);
+  background: rgba(116, 229, 255, 0.08);
+  color: #e8fbff;
+}
+
+.tool-runner-kicker {
+  display: block;
+  color: rgba(139, 233, 255, 0.76);
+  font-size: 12px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.tool-runner-header h1 {
+  margin: 4px 0 0;
+  color: #fff;
+  font-size: 28px;
+  line-height: 1.18;
+  letter-spacing: 0;
+}
+
+.tool-runner-loading {
+  min-height: 420px;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 14px;
+  color: rgba(231, 240, 255, 0.72);
+}
+
+.game-tool-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid rgba(116, 229, 255, 0.2);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.055);
+  box-shadow:
+    0 16px 40px rgba(0, 0, 0, 0.18),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+
+.game-tool-switch .ant-btn {
+  min-height: 34px;
+  padding: 0 14px;
+  color: rgba(220, 232, 255, 0.78);
+  font-weight: 850;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  box-shadow: none;
+}
+
+.game-tool-switch .ant-btn:hover,
+.game-tool-switch .ant-btn:focus-visible {
+  color: #ffffff !important;
+  background: rgba(116, 229, 255, 0.12) !important;
+}
+
+.game-tool-switch .ant-btn.is-active {
+  color: #ffffff;
+  background:
+    linear-gradient(180deg, rgba(116, 229, 255, 0.28), rgba(116, 229, 255, 0.12)),
+    rgba(9, 28, 50, 0.82);
+  box-shadow:
+    0 0 0 1px rgba(116, 229, 255, 0.28),
+    0 10px 26px rgba(0, 0, 0, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.18);
+}
+
+@media (max-width: 720px) {
+  .tool-runner-header {
+    width: calc(100% - 28px);
+    grid-template-columns: 1fr;
+    align-items: start;
+  }
+
+  .tool-runner-header h1 {
+    font-size: 23px;
+  }
+
+  .game-tool-switch {
+    width: 100%;
+  }
+
+  .game-tool-switch .ant-btn {
+    flex: 1;
+    min-width: 0;
+  }
+}

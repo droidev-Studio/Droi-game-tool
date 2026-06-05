@@ -10,9 +10,11 @@ interface StashableImageProps extends ImgHTMLAttributes<HTMLImageElement> {
 
 /** 可拖拽到暂存框的图片，继承 img 所有属性 */
 const StashableImage = forwardRef<HTMLImageElement, StashableImageProps>(function StashableImage(
-  { src, stashName: _stashName, draggable = true, onDragStart, ...props },
+  { src, stashName, draggable = true, onDragStart, ...props },
   ref,
 ) {
+  void stashName
+
   const handleDragStart = (e: React.DragEvent<HTMLImageElement>) => {
     e.dataTransfer.setData(STASH_DRAG_TYPE, src)
     e.dataTransfer.effectAllowed = 'copy'

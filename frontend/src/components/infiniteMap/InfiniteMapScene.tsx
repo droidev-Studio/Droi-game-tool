@@ -247,7 +247,8 @@ function updateFallFlake(
     twMul = 0.00235
   }
   const tw = t0 * twMul
-  let { wx, wz, pixelFallY, vxScreen, vy, wobble, layer, variant } = f
+  let { wx, pixelFallY } = f
+  const { wz, vxScreen, vy, wobble, layer, variant } = f
   const dz = camZ - wz
   if (dz <= 0) return respawnFallFlake(camX, camZ, layer, particleKind)
   wx += (dz / FOCAL) * (vxScreen + Math.sin(tw + wobble) * swayAmp) * dt

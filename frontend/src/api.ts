@@ -13,6 +13,19 @@ export interface JobParams {
   columns?: number
   matte_strength?: number
   crop_mode?: 'none' | 'tight_bbox' | 'safe_bbox'
+  matte_mode?: 'ai' | 'none' | 'chroma' | 'luma' | 'ai_luma'
+  matte_key_color?: string
+  matte_threshold?: number
+  matte_softness?: number
+  matte_despill?: number
+  matte_halo?: number
+  luma_black?: number
+  luma_white?: number
+  luma_gamma?: number
+  luma_strength?: number
+  green_to_black?: boolean
+  semitransparent_to_black?: boolean
+  semitransparent_to_opaque?: boolean
 }
 
 export interface Job {
@@ -37,6 +50,21 @@ export async function createJob(file: File, params: JobParams): Promise<{ job_id
     throw new Error(err.detail || String(err))
   }
   return res.json()
+}
+
+export async function previewJobFrame(file: File, params: JobParams): Promise<Blob> {
+  const formData = new FormData()
+  formData.append('file', file)
+  formData.append('params', JSON.stringify(params))
+  const res = await fetch(`${API_BASE}/jobs/preview-frame`, {
+    method: 'POST',
+    body: formData,
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }))
+    throw new Error(err.detail || String(err))
+  }
+  return res.blob()
 }
 
 export async function getJob(jobId: string): Promise<Job> {
@@ -86,10 +114,13 @@ export function getWatermarkResultUrl(jobId: string): string {
 }
 
 /** AI matte: upload an image and receive a transparent PNG blob. The first call may be slower. */
-export async function removeBackground(file: File): Promise<Blob> {
+export async function removeBackground(file: File, signal?: AbortSignal): Promise<Blob> {
   const formData = new FormData()
   formData.append('file', file)
   const ctrl = new AbortController()
+  const abortFromParent = () => ctrl.abort()
+  if (signal?.aborted) ctrl.abort()
+  signal?.addEventListener('abort', abortFromParent, { once: true })
   const timeout = setTimeout(() => ctrl.abort(), 120_000)
   try {
     const res = await fetch(`${API_BASE}/matte`, {
@@ -104,6 +135,7 @@ export async function removeBackground(file: File): Promise<Blob> {
     return res.blob()
   } finally {
     clearTimeout(timeout)
+    signal?.removeEventListener('abort', abortFromParent)
   }
 }
 

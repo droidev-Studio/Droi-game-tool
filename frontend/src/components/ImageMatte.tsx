@@ -96,7 +96,7 @@ function chromaKeyCanvas(
       const baseMask = Math.max(0, dist - thresh)
       const spillVal = Math.pow(Math.min(1, baseMask / Math.max(1, spillStr * 120)), 1.5)
       const gray = r * 0.2126 + g * 0.7152 + b * 0.0722
-      let rr = gray * (1 - spillVal) + r * spillVal
+      const rr = gray * (1 - spillVal) + r * spillVal
       let gg = gray * (1 - spillVal) + g * spillVal
       let bb = gray * (1 - spillVal) + b * spillVal
       const strength = Math.min(1, spillStr * (1.2 - spillVal * 0.4))

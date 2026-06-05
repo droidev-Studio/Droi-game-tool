@@ -26,3 +26,5 @@ dist-ssr
 # 源图仅保留 public/ 构建用副本
 bagei.png
 pixelmaster.png
+playwright-report
+test-results

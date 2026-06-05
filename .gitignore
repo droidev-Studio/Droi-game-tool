@@ -27,6 +27,7 @@ frontend/dist
 backend/uploads/*
 !backend/uploads/.gitkeep
 backend/outputs/
+backend/temp/
 .codex-runlogs/
 
 # IDE

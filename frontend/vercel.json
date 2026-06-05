@@ -1,0 +1,12 @@
+{
+  "rewrites": [
+    {
+      "source": "/tool/:path*",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/((?!assets/|api/|favicon.ico).*)",
+      "destination": "/index.html"
+    }
+  ]
+}

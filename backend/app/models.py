@@ -32,6 +32,19 @@ class JobParams(BaseModel):
     columns: int = Field(ge=1, le=64, default=12)
     matte_strength: float = Field(ge=0.0, le=1.0, default=0.6)
     crop_mode: str = "tight_bbox"  # none / tight_bbox / safe_bbox
+    matte_mode: str = "ai"  # ai / none / chroma / luma / ai_luma
+    matte_key_color: str = "#00ff00"
+    matte_threshold: int = Field(ge=0, le=255, default=72)
+    matte_softness: int = Field(ge=0, le=128, default=24)
+    matte_despill: float = Field(ge=0.0, le=2.5, default=0.85)
+    matte_halo: int = Field(ge=0, le=8, default=1)
+    luma_black: int = Field(ge=0, le=254, default=24)
+    luma_white: int = Field(ge=1, le=255, default=210)
+    luma_gamma: float = Field(ge=0.05, le=4.0, default=0.75)
+    luma_strength: float = Field(ge=0.0, le=2.0, default=1.25)
+    green_to_black: bool = False
+    semitransparent_to_black: bool = False
+    semitransparent_to_opaque: bool = False
 
 
 class JobCreateRequest(BaseModel):

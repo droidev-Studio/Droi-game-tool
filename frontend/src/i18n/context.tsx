@@ -2,7 +2,8 @@ import { createContext, useContext, useState, useCallback, useEffect, useRef } f
 import type { Lang } from './locales'
 import { t as tFn } from './locales'
 
-const STORAGE_KEY = 'frameronin_lang_v2'
+const STORAGE_KEY = 'droi_game_tool_lang_v2'
+const LEGACY_STORAGE_KEY = ['frame', 'ronin_lang_v2'].join('')
 
 const HTML_LANG: Record<Lang, string> = { zh: 'zh-CN', en: 'en', ja: 'ja' }
 
@@ -15,7 +16,7 @@ const LanguageContext = createContext<{
 export function LanguageProvider({ children }: { children: React.ReactNode }) {
   const [lang, setLangState] = useState<Lang>(() => {
     try {
-      const s = localStorage.getItem(STORAGE_KEY)
+      const s = localStorage.getItem(STORAGE_KEY) ?? localStorage.getItem(LEGACY_STORAGE_KEY)
       if (s === 'zh' || s === 'en' || s === 'ja') return s
     } catch { /* ignore */ }
     return 'en'

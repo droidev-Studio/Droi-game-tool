@@ -48,8 +48,6 @@ export default function ImageFineProcess({ handoffFile = null, onHandoffConsumed
       }
     }
   }
-
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- 仅响应外部 handoff
   useEffect(() => {
     if (!handoffFile) return
     void handleFile(handoffFile).finally(() => onHandoffConsumed?.())

@@ -1,0 +1,226 @@
+.character-frame-import {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 14px;
+  padding: 12px;
+  border: 1px solid rgba(116, 229, 255, 0.16);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.character-frame-import-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.character-frame-import-head strong {
+  display: block;
+  margin-top: 3px;
+  color: #ffffff;
+  font-size: 14px;
+}
+
+.character-frame-import-head > span {
+  flex: 0 0 auto;
+  color: #aeb4cf;
+  font-size: 12px;
+}
+
+.character-frame-import-actions,
+.character-frame-import-controls {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.character-frame-import-selectors {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.character-frame-import-settings {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.character-frame-import-settings label {
+  display: grid;
+  gap: 4px;
+  color: #aeb4cf;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.character-frame-import-settings .ant-input-number {
+  width: 100%;
+}
+
+.character-frame-import-limit-note {
+  color: #aeb4cf !important;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.character-frame-import-settings input[type='color'] {
+  width: 100%;
+  height: 32px;
+  padding: 0;
+  border: 1px solid rgba(116, 229, 255, 0.22);
+  border-radius: 6px;
+  background: transparent;
+}
+
+.character-frame-import-matte {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid rgba(116, 229, 255, 0.14);
+  border-radius: 8px;
+  background: rgba(5, 10, 22, 0.36);
+}
+
+.character-frame-import-preset-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.character-frame-import-switch {
+  display: flex !important;
+  align-items: center;
+  gap: 8px !important;
+}
+
+.character-frame-import-video {
+  display: grid;
+  gap: 8px;
+}
+
+.character-frame-import-preview-tools {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+}
+
+.character-frame-import-preview-tools label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #c5d2f5;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.character-frame-import-preview {
+  display: grid;
+  min-height: 150px;
+  place-items: center;
+  overflow: hidden;
+  border: 1px dashed rgba(116, 229, 255, 0.2);
+  border-radius: 8px;
+  background:
+    linear-gradient(45deg, rgba(255, 255, 255, 0.055) 25%, transparent 25%),
+    linear-gradient(-45deg, rgba(255, 255, 255, 0.055) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, rgba(255, 255, 255, 0.055) 75%),
+    linear-gradient(-45deg, transparent 75%, rgba(255, 255, 255, 0.055) 75%),
+    rgba(5, 10, 22, 0.72);
+  background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+  background-size: 16px 16px;
+}
+
+.character-frame-import-preview.is-dark {
+  background: #030611;
+}
+
+.character-frame-import-preview.is-light {
+  background: #f4f7ff;
+}
+
+.character-frame-import-preview img {
+  max-width: 100%;
+  max-height: 220px;
+  image-rendering: pixelated;
+  object-fit: contain;
+}
+
+.character-frame-import-preview span {
+  max-width: 240px;
+  color: #aeb4cf;
+  font-size: 12px;
+  line-height: 1.45;
+  text-align: center;
+}
+
+.character-frame-import-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(48px, 1fr));
+  gap: 6px;
+  max-height: 138px;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.character-frame-import-strip button {
+  position: relative;
+  display: grid;
+  aspect-ratio: 1;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid rgba(116, 229, 255, 0.16);
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.22);
+  cursor: pointer;
+}
+
+.character-frame-import-strip button.is-active {
+  border-color: rgba(116, 229, 255, 0.76);
+  box-shadow: 0 0 0 2px rgba(116, 229, 255, 0.12);
+}
+
+.character-frame-import-strip img {
+  max-width: 100%;
+  max-height: 100%;
+  image-rendering: pixelated;
+  object-fit: contain;
+}
+
+.character-frame-import-strip small {
+  position: absolute;
+  right: 3px;
+  bottom: 2px;
+  color: #ffffff;
+  font-size: 10px;
+  text-shadow: 0 1px 3px #000;
+}
+
+.character-frame-import-strip input[type='checkbox'] {
+  position: absolute;
+  left: 3px;
+  bottom: 3px;
+  z-index: 2;
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: #74e5ff;
+}
+
+.character-frame-import-strip em {
+  position: absolute;
+  left: 3px;
+  top: 2px;
+  color: rgba(255, 255, 255, 0.76);
+  font-size: 10px;
+  line-height: 1;
+  opacity: 0;
+  transition: opacity 0.16s ease;
+}
+
+.character-frame-import-strip button:hover em,
+.character-frame-import-strip button:focus-visible em {
+  opacity: 1;
+}

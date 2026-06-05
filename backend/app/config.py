@@ -9,6 +9,8 @@ OUTPUT_DIR = Path(os.getenv("OUTPUT_DIR", str(BASE_DIR / "outputs")))
 TEMP_DIR = Path(os.getenv("TEMP_DIR", str(BASE_DIR / "temp")))
 
 # 文件限制
+# Upload limits are enforced server-side and can be raised by deployment env.
+# Browser-side tools should not add their own hard file-size cap.
 MAX_UPLOAD_SIZE_MB = int(os.getenv("MAX_UPLOAD_SIZE_MB", "200"))
 MAX_VIDEO_DURATION_SEC = int(os.getenv("MAX_VIDEO_DURATION_SEC", "300"))
 MAX_FRAMES = int(os.getenv("MAX_FRAMES", "2000"))

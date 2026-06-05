@@ -1,19 +1,22 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { CSSProperties, PointerEvent } from 'react'
 import {
   ArrowDownOutlined,
   ArrowLeftOutlined,
   ArrowRightOutlined,
   ArrowUpOutlined,
+  DeleteOutlined,
   DownloadOutlined,
   MergeCellsOutlined,
   MinusOutlined,
   PlusOutlined,
+  RedoOutlined,
   UploadOutlined,
 } from '@ant-design/icons'
 import { App, Button, Segmented, Slider, Space, Switch, Typography } from 'antd'
 import { useLanguage } from '../../i18n/context'
 import { drawBlendedTile, type BlendRect } from './mapBlend'
-import { canvasToBlob, downloadBlob, loadImageFile } from './obstacleExport'
+import { canvasToBlob, imageBlobToZip, loadImageFile } from './obstacleExport'
 import type { LoadedImage } from './obstacleModel'
 
 const { Text, Title } = Typography
@@ -30,8 +33,11 @@ type Tile = {
   h: number
 }
 
+type TileUpload = LoadedImage & {
+  rotation: number
+}
+
 const CENTER_TILE = { x: 0, y: 0, w: 1, h: 1 }
-const MAX_IMAGE_MB = 30
 const MIN_VIEW_ZOOM = 0.08
 const MAX_VIEW_ZOOM = 4
 const VIEW_ZOOM_STEP = 1.2
@@ -43,7 +49,6 @@ const mapComposerCopy = {
     sideBottom: 'Bottom',
     sideLeft: 'Left',
     chooseMap: 'Please choose a map image.',
-    tooLarge: 'Image must be under {size}MB.',
     chooseTile: 'Please choose an expansion tile image.',
     uploadCenterFirst: 'Upload a center map first.',
     stitchedReady: 'Stitched map generated. You can continue editing obstacles.',
@@ -52,6 +57,11 @@ const mapComposerCopy = {
     description: 'Upload the center map, add expansion tiles for each side, then generate a larger map for obstacle editing.',
     uploadCenter: 'Upload Center Map',
     replaceCenter: 'Replace Center Map',
+    rotateCenter: 'Rotate Center Map 90deg',
+    rotateTile: 'Rotate Tile 90deg',
+    deleteCenter: 'Delete Center Map',
+    deleteTile: 'Delete Tile',
+    rotated: 'Rotated {value}deg',
     split: 'Split',
     expansionSettings: 'Expansion Settings',
     parts4: '4 parts',
@@ -67,7 +77,7 @@ const mapComposerCopy = {
     generateContinue: 'Generate and Continue',
     uploadedTiles: 'Uploaded {count} / {total} expansion tiles',
     generateAndEdit: 'Generate and Edit Obstacles',
-    exportOnly: 'Export Stitched PNG Only',
+    exportOnly: 'Export Stitched ZIP Only',
     zoomOut: 'Zoom stitch preview out',
     zoomIn: 'Zoom stitch preview in',
     fit: 'Fit',
@@ -85,7 +95,6 @@ const mapComposerCopy = {
     sideBottom: '下方',
     sideLeft: '左侧',
     chooseMap: '请选择地图图片。',
-    tooLarge: '图片不能超过 {size}MB。',
     chooseTile: '请选择扩展块图片。',
     uploadCenterFirst: '请先上传中心地图。',
     stitchedReady: '已生成拼接底图，可以继续编辑阻挡物。',
@@ -109,7 +118,7 @@ const mapComposerCopy = {
     generateContinue: '生成与继续',
     uploadedTiles: '已上传 {count} / {total} 个扩展块',
     generateAndEdit: '生成拼接并编辑阻挡物',
-    exportOnly: '只导出拼接 PNG',
+    exportOnly: '只导出拼接 ZIP',
     zoomOut: '缩小拼接预览',
     zoomIn: '放大拼接预览',
     fit: '适应',
@@ -127,7 +136,6 @@ const mapComposerCopy = {
     sideBottom: '下',
     sideLeft: '左',
     chooseMap: 'マップ画像を選択してください。',
-    tooLarge: '画像は {size}MB 以下にしてください。',
     chooseTile: '拡張タイル画像を選択してください。',
     uploadCenterFirst: '先に中央マップを読み込んでください。',
     stitchedReady: '結合マップを生成しました。障害物編集へ進めます。',
@@ -151,7 +159,7 @@ const mapComposerCopy = {
     generateContinue: '生成して続行',
     uploadedTiles: '{count} / {total} 個の拡張タイルを読み込み済み',
     generateAndEdit: '生成して障害物を編集',
-    exportOnly: '結合 PNG のみ書き出し',
+    exportOnly: '結合 ZIP のみ書き出し',
     zoomOut: '結合プレビューを縮小',
     zoomIn: '結合プレビューを拡大',
     fit: 'フィット',
@@ -164,6 +172,22 @@ const mapComposerCopy = {
     fitRatio: 'フィット倍率 {value}%',
   },
 }
+
+Object.assign(mapComposerCopy.zh, {
+  rotateCenter: '旋转中心地图 90°',
+  rotateTile: '旋转扩展块 90°',
+  deleteCenter: '删除中心地图',
+  deleteTile: '删除扩展块',
+  rotated: '已旋转 {value}°',
+})
+
+Object.assign(mapComposerCopy.ja, {
+  rotateCenter: '中央マップを90°回転',
+  rotateTile: 'タイルを90°回転',
+  deleteCenter: '中央マップを削除',
+  deleteTile: 'タイルを削除',
+  rotated: '{value}°回転済み',
+})
 
 function formatCopy(template: string, params: Record<string, string | number>): string {
   return template.replace(/\{(\w+)\}/g, (_, key) => String(params[key] ?? ''))
@@ -276,6 +300,38 @@ function sideIcon(side: Side) {
   return <ArrowLeftOutlined />
 }
 
+function imageUrlToElement(url: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const image = new Image()
+    image.onload = () => resolve(image)
+    image.onerror = () => reject(new Error('Rotated image failed to load'))
+    image.src = url
+  })
+}
+
+async function rotateLoadedImageClockwise(source: LoadedImage): Promise<LoadedImage> {
+  const canvas = document.createElement('canvas')
+  canvas.width = source.height
+  canvas.height = source.width
+  const ctx = canvas.getContext('2d')
+  if (!ctx) throw new Error('Canvas creation failed')
+  ctx.imageSmoothingEnabled = false
+  ctx.translate(canvas.width, 0)
+  ctx.rotate(Math.PI / 2)
+  ctx.drawImage(source.image, 0, 0)
+  const blob = await canvasToBlob(canvas)
+  const fileName = source.file.name.replace(/\.[^.]+$/, '') + '_rotated.png'
+  const file = new File([blob], fileName, { type: 'image/png' })
+  const url = URL.createObjectURL(file)
+  try {
+    const image = await imageUrlToElement(url)
+    return { file, url, image, width: canvas.width, height: canvas.height }
+  } catch (error) {
+    URL.revokeObjectURL(url)
+    throw error
+  }
+}
+
 async function canvasToFile(canvas: HTMLCanvasElement, name: string): Promise<File> {
   const blob = await canvasToBlob(canvas)
   return new File([blob], name, { type: 'image/png' })
@@ -289,7 +345,7 @@ export default function MapComposer({
   onUseStitchedMap: (file: File, canvas: HTMLCanvasElement) => void
 }) {
   const { lang } = useLanguage()
-  const copy = mapComposerCopy[lang]
+  const copy = mapComposerCopy[lang] as typeof mapComposerCopy.en
   const { message } = App.useApp()
   const [source, setSource] = useState<LoadedImage | null>(null)
   const [split, setSplit] = useState<ExpandSplit>(4)
@@ -297,13 +353,23 @@ export default function MapComposer({
   const [verticalOverlapPercent, setVerticalOverlapPercent] = useState(15)
   const [seamBlendEnabled, setSeamBlendEnabled] = useState(true)
   const [seamBlendStrength, setSeamBlendStrength] = useState(100)
-  const [tileUploads, setTileUploads] = useState<Record<string, LoadedImage>>({})
+  const [tileUploads, setTileUploads] = useState<Record<string, TileUpload>>({})
   const sourceInputRef = useRef<HTMLInputElement | null>(null)
   const tileInputRefs = useRef<Record<string, HTMLInputElement | null>>({})
   const previewCanvasRef = useRef<HTMLCanvasElement | null>(null)
   const workspaceRef = useRef<HTMLElement | null>(null)
   const [fitZoom, setFitZoom] = useState(1)
   const [viewZoom, setViewZoom] = useState(1)
+  const [pan, setPan] = useState({ x: 0, y: 0 })
+  const [isPanning, setIsPanning] = useState(false)
+  const [focusedMapKey, setFocusedMapKey] = useState<string | null>(null)
+  const panDragRef = useRef<{
+    pointerId: number
+    startClientX: number
+    startClientY: number
+    startPanX: number
+    startPanY: number
+  } | null>(null)
   const cleanupRef = useRef({ source, tileUploads })
   cleanupRef.current = { source, tileUploads }
 
@@ -368,6 +434,7 @@ export default function MapComposer({
     )
     setFitZoom(nextFitZoom)
     setViewZoom(nextFitZoom)
+    setPan({ x: 0, y: 0 })
   }, [stage])
 
   const zoomIn = useCallback(() => {
@@ -376,6 +443,52 @@ export default function MapComposer({
 
   const zoomOut = useCallback(() => {
     setViewZoom((value) => clamp(value / VIEW_ZOOM_STEP, MIN_VIEW_ZOOM, MAX_VIEW_ZOOM))
+  }, [])
+
+  const canStartPan = (target: EventTarget | null) => {
+    if (!(target instanceof Element)) return true
+    return !target.closest('button,input,label,.ant-btn,.ant-slider,.ant-segmented')
+  }
+
+  const focusMapFromPointer = useCallback((event: PointerEvent<HTMLDivElement>) => {
+    if (!(event.target instanceof Element)) return
+    const tileTarget = event.target.closest<HTMLElement>('[data-map-tile-key]')
+    const nextFocusedMapKey = tileTarget?.dataset.mapTileKey
+    if (nextFocusedMapKey) setFocusedMapKey(nextFocusedMapKey)
+  }, [])
+
+  const startPanDrag = useCallback((event: PointerEvent<HTMLDivElement>) => {
+    if (!stage || event.button !== 0 || !canStartPan(event.target)) return
+    event.preventDefault()
+    event.currentTarget.setPointerCapture(event.pointerId)
+    panDragRef.current = {
+      pointerId: event.pointerId,
+      startClientX: event.clientX,
+      startClientY: event.clientY,
+      startPanX: pan.x,
+      startPanY: pan.y,
+    }
+    setIsPanning(true)
+  }, [pan.x, pan.y, stage])
+
+  const updatePanDrag = useCallback((event: PointerEvent<HTMLDivElement>) => {
+    const drag = panDragRef.current
+    if (!drag || drag.pointerId !== event.pointerId) return
+    event.preventDefault()
+    setPan({
+      x: drag.startPanX + event.clientX - drag.startClientX,
+      y: drag.startPanY + event.clientY - drag.startClientY,
+    })
+  }, [])
+
+  const stopPanDrag = useCallback((event: PointerEvent<HTMLDivElement>) => {
+    const drag = panDragRef.current
+    if (!drag || drag.pointerId !== event.pointerId) return
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId)
+    }
+    panDragRef.current = null
+    setIsPanning(false)
   }, [])
 
   useEffect(() => {
@@ -424,10 +537,6 @@ export default function MapComposer({
       message.error(copy.chooseMap)
       return
     }
-    if (file.size > MAX_IMAGE_MB * 1024 * 1024) {
-      message.error(formatCopy(copy.tooLarge, { size: MAX_IMAGE_MB }))
-      return
-    }
     try {
       const loaded = await loadImageFile(file)
       setSource((prev) => {
@@ -438,9 +547,72 @@ export default function MapComposer({
         Object.values(prev).forEach((item) => URL.revokeObjectURL(item.url))
         return {}
       })
+      setFocusedMapKey(null)
     } catch (error) {
       message.error(String(error))
     }
+  }
+
+  const rotateCenterMap = async () => {
+    if (!source) return
+    try {
+      const rotated = await rotateLoadedImageClockwise(source)
+      setSource((prev) => {
+        if (prev) URL.revokeObjectURL(prev.url)
+        return rotated
+      })
+    } catch (error) {
+      message.error(String(error))
+    }
+  }
+
+  const deleteCenterMap = () => {
+    setSource((prev) => {
+      if (prev) URL.revokeObjectURL(prev.url)
+      return null
+    })
+    setTileUploads((prev) => {
+      Object.values(prev).forEach((item) => URL.revokeObjectURL(item.url))
+      return {}
+    })
+    setFocusedMapKey(null)
+  }
+
+  const rotateTileUpload = async (tileKey: string) => {
+    const upload = tileUploads[tileKey]
+    if (!upload) return
+    try {
+      const rotated = await rotateLoadedImageClockwise(upload)
+      setTileUploads((prev) => {
+        const current = prev[tileKey]
+        if (!current) {
+          URL.revokeObjectURL(rotated.url)
+          return prev
+        }
+        URL.revokeObjectURL(current.url)
+        return {
+          ...prev,
+          [tileKey]: {
+            ...rotated,
+            rotation: (current.rotation + 90) % 360,
+          },
+        }
+      })
+    } catch (error) {
+      message.error(String(error))
+    }
+  }
+
+  const deleteTileUpload = (tileKey: string) => {
+    setTileUploads((prev) => {
+      const current = prev[tileKey]
+      if (!current) return prev
+      URL.revokeObjectURL(current.url)
+      const next = { ...prev }
+      delete next[tileKey]
+      return next
+    })
+    setFocusedMapKey(null)
   }
 
   const selectTile = async (tile: Tile, file: File | null) => {
@@ -453,8 +625,9 @@ export default function MapComposer({
       const loaded = await loadImageFile(file)
       setTileUploads((prev) => {
         if (prev[tile.key]) URL.revokeObjectURL(prev[tile.key].url)
-        return { ...prev, [tile.key]: loaded }
+        return { ...prev, [tile.key]: { ...loaded, rotation: 0 } }
       })
+      setFocusedMapKey(tile.key)
     } catch (error) {
       message.error(String(error))
     }
@@ -519,7 +692,7 @@ export default function MapComposer({
     previewCtx.drawImage(stitchedCanvas, 0, 0)
   }, [source, tiles, tileUploads, seamBlendEnabled, seamBlendStrength])
 
-  const useStitchedMap = async () => {
+  const generateStitchedMapForEditing = async () => {
     const canvas = createStitchedCanvas()
     if (!canvas) {
       message.warning(copy.uploadCenterFirst)
@@ -532,7 +705,13 @@ export default function MapComposer({
   const exportStitchedPng = async () => {
     const canvas = createStitchedCanvas()
     if (!canvas) return
-    downloadBlob(await canvasToBlob(canvas), 'stitched_map.png')
+    const blob = await canvasToBlob(canvas)
+    await imageBlobToZip(blob, 'stitched_map.png', 'stitched_map.zip', {
+      type: 'stitchedMap',
+      width: canvas.width,
+      height: canvas.height,
+      tileCount: Object.keys(tileUploads).length + 1,
+    })
   }
 
   const uploadedCount = Object.keys(tileUploads).length
@@ -546,10 +725,28 @@ export default function MapComposer({
           <Text className="map-studio-section-copy">
             {copy.description}
           </Text>
-          <input ref={sourceInputRef} hidden type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => void selectSource(event.target.files?.[0] ?? null)} />
+          <input
+            ref={sourceInputRef}
+            data-testid="map-composer-source-input"
+            hidden
+            type="file"
+            accept="image/png,image/jpeg,image/webp"
+            onChange={(event) => void selectSource(event.target.files?.[0] ?? null)}
+          />
           <Button className="map-studio-primary-btn" block icon={<UploadOutlined />} onClick={() => sourceInputRef.current?.click()}>
             {source ? copy.replaceCenter : copy.uploadCenter}
           </Button>
+          {source && (
+            <Button
+              data-testid="rotate-center-map"
+              className="map-studio-primary-btn"
+              block
+              icon={<RedoOutlined />}
+              onClick={() => void rotateCenterMap()}
+            >
+              {copy.rotateCenter}
+            </Button>
+          )}
           {source && <Text className="map-studio-meta">{source.width} × {source.height}px</Text>}
         </section>
 
@@ -565,6 +762,7 @@ export default function MapComposer({
                 Object.values(prev).forEach((item) => URL.revokeObjectURL(item.url))
                 return {}
               })
+              setFocusedMapKey(null)
             }}
             options={[
               { value: 4, label: copy.parts4 },
@@ -593,8 +791,8 @@ export default function MapComposer({
           <Text className="map-studio-section-label">{copy.next}</Text>
           <Text className="map-studio-section-title">{copy.generateContinue}</Text>
           <Text className="map-studio-meta">{formatCopy(copy.uploadedTiles, { count: uploadedCount, total: tiles.length })}</Text>
-          <Space direction="vertical" style={{ width: '100%' }}>
-            <Button className="map-studio-primary-btn" block icon={<MergeCellsOutlined />} disabled={!source} onClick={() => void useStitchedMap()}>
+          <Space orientation="vertical" style={{ width: '100%' }}>
+            <Button className="map-studio-primary-btn" block icon={<MergeCellsOutlined />} disabled={!source} onClick={() => void generateStitchedMapForEditing()}>
               {copy.generateAndEdit}
             </Button>
             <Button block icon={<DownloadOutlined />} disabled={!source} onClick={() => void exportStitchedPng()}>
@@ -604,7 +802,7 @@ export default function MapComposer({
         </section>
       </aside>
 
-      <main ref={workspaceRef} className="map-composer-workspace">
+      <main ref={workspaceRef} className={`map-composer-workspace ${stage ? 'has-stage' : ''} ${isPanning ? 'is-panning' : ''}`}>
         <div className="map-composer-zoom-tools">
           <Button disabled={!stage} icon={<MinusOutlined />} aria-label={copy.zoomOut} onClick={zoomOut} />
           <Text>{Math.round(viewZoom * 100)}%</Text>
@@ -620,17 +818,57 @@ export default function MapComposer({
         ) : (
           <>
             <div
+              data-testid="map-composer-stage-wrap"
               className="map-composer-stage-wrap"
-              style={{ transform: `translate(-50%, -50%) scale(${viewZoom})` }}
+              onPointerDownCapture={focusMapFromPointer}
+              onPointerDown={startPanDrag}
+              onPointerMove={updatePanDrag}
+              onPointerUp={stopPanDrag}
+              onPointerCancel={stopPanDrag}
+              onContextMenu={(event) => event.preventDefault()}
+              style={{
+                transform: `translate(calc(-50% + ${pan.x}px), calc(-50% + ${pan.y}px)) scale(${viewZoom})`,
+                '--map-rotate-button-scale': String(1 / viewZoom),
+              } as CSSProperties & Record<'--map-rotate-button-scale', string>}
             >
               <div className="map-composer-stage" style={{ width: stage.width, height: stage.height }}>
                 <canvas ref={previewCanvasRef} className="map-composer-preview-canvas" aria-label={copy.preview} />
+                <div
+                  className={`map-composer-center-tools ${focusedMapKey === 'center' ? 'is-focused' : ''}`}
+                  data-map-tile-key="center"
+                  style={{
+                    left: (CENTER_TILE.x - stage.minX) * stage.unitW,
+                    top: (CENTER_TILE.y - stage.minY) * stage.unitH,
+                    width: CENTER_TILE.w * stage.unitW,
+                    height: CENTER_TILE.h * stage.unitH,
+                  }}
+                >
+                  <div className="map-composer-map-tool-cluster">
+                    <Button
+                      data-testid="rotate-center-map-stage"
+                      className="map-composer-map-tool-button map-composer-map-rotate-button"
+                      icon={<RedoOutlined />}
+                      aria-label={copy.rotateCenter}
+                      title={copy.rotateCenter}
+                      onClick={() => void rotateCenterMap()}
+                    />
+                    <Button
+                      data-testid="delete-center-map-stage"
+                      className="map-composer-map-tool-button map-composer-map-delete-button"
+                      icon={<DeleteOutlined />}
+                      aria-label={copy.deleteCenter}
+                      title={copy.deleteCenter}
+                      onClick={deleteCenterMap}
+                    />
+                  </div>
+                </div>
                 {tiles.map((tile) => {
                   const upload = tileUploads[tile.key]
                   return (
                     <div
                       key={tile.key}
-                      className={`map-composer-tile map-composer-tile-${tile.side} ${upload ? 'has-image' : ''}`}
+                      className={`map-composer-tile map-composer-tile-${tile.side} ${upload ? 'has-image' : ''} ${focusedMapKey === tile.key ? 'is-focused' : ''}`}
+                      data-map-tile-key={tile.key}
                       style={{
                         left: (tile.x - stage.minX) * stage.unitW,
                         top: (tile.y - stage.minY) * stage.unitH,
@@ -642,14 +880,42 @@ export default function MapComposer({
                         ref={(node) => {
                           tileInputRefs.current[tile.key] = node
                         }}
+                        data-testid={`map-composer-tile-input-${tile.key}`}
                         hidden
                         type="file"
                         accept="image/png,image/jpeg,image/webp"
                         onChange={(event) => void selectTile(tile, event.target.files?.[0] ?? null)}
                       />
-                      <Button className="map-composer-tile-action" icon={sideIcon(tile.side)} onClick={() => tileInputRefs.current[tile.key]?.click()}>
-                        {formatCopy(upload ? copy.replaceSide : copy.uploadSide, { side: sideLabel(tile.side, copy) })}
-                      </Button>
+                      <div className="map-composer-tile-controls">
+                        <Button className="map-composer-tile-action" icon={sideIcon(tile.side)} onClick={() => tileInputRefs.current[tile.key]?.click()}>
+                          {formatCopy(upload ? copy.replaceSide : copy.uploadSide, { side: sideLabel(tile.side, copy) })}
+                        </Button>
+                        {upload && (
+                          <Text className="map-composer-tile-rotation">
+                            {formatCopy(copy.rotated, { value: upload.rotation })}
+                          </Text>
+                        )}
+                      </div>
+                      {upload && (
+                        <div className="map-composer-map-tool-cluster">
+                          <Button
+                            data-testid={`rotate-map-tile-${tile.key}`}
+                            className="map-composer-map-tool-button map-composer-map-rotate-button"
+                            icon={<RedoOutlined />}
+                            aria-label={copy.rotateTile}
+                            title={copy.rotateTile}
+                            onClick={() => void rotateTileUpload(tile.key)}
+                          />
+                          <Button
+                            data-testid={`delete-map-tile-${tile.key}`}
+                            className="map-composer-map-tool-button map-composer-map-delete-button"
+                            icon={<DeleteOutlined />}
+                            aria-label={copy.deleteTile}
+                            title={copy.deleteTile}
+                            onClick={() => deleteTileUpload(tile.key)}
+                          />
+                        </div>
+                      )}
                     </div>
                   )
                 })}

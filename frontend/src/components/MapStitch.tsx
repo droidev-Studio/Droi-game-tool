@@ -1306,7 +1306,7 @@ export default function MapStitch({ onBack }: Props) {
             <Select<ExpandSplit>
               value={expandSplit}
               onChange={setExpandSplit}
-              popupClassName="map-stitch-split-popup"
+              classNames={{ popup: { root: 'map-stitch-split-popup' } }}
               getPopupContainer={(trigger) => trigger.parentElement ?? document.body}
               options={[
                 { value: 4, label: '4分扩图' },

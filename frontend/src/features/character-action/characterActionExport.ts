@@ -320,4 +320,5 @@ export async function exportCharacterActionZip(project: ExportProject) {
   zip.file('assets_manifest_patch.json', JSON.stringify(manifestPatch, null, 2))
   const blob = await zip.generateAsync({ type: 'blob' })
   downloadBlob(blob, 'character_action_package.zip')
+  return { blob, actionJson, manifestPatch }
 }

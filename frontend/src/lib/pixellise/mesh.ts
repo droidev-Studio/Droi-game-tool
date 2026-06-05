@@ -107,7 +107,7 @@ function homogenizeLines(lines: number[], pixelWidth: number): number[] {
   for (let index = 0; index < n - 1; index++) {
     const lineStart = lines[index]!
     const sectionWidth = sectionWidths[index]!
-    let numPixels = Math.round(sectionWidth / pixelWidth)
+    const numPixels = Math.round(sectionWidth / pixelWidth)
     if (numPixels <= 0) {
       pieces.push([])
       continue
@@ -154,10 +154,10 @@ function computeMeshOnImage(cv: Cv, rgba: ImageData, closureKernelSize = 8): Mes
     cv.Canny(gray, edges, 50, 200)
     cv.morphologyEx(edges, closed, cv.MORPH_CLOSE, kernel)
 
-    let meshInitial = detectGridLines(cv, closed)
+    const meshInitial = detectGridLines(cv, closed)
     const pixelWidth = Math.max(2, Math.round(getPixelWidth(meshInitial)))
-    let linesX = homogenizeLines(meshInitial[0], pixelWidth)
-    let linesY = homogenizeLines(meshInitial[1], pixelWidth)
+    const linesX = homogenizeLines(meshInitial[0], pixelWidth)
+    const linesY = homogenizeLines(meshInitial[1], pixelWidth)
     return [linesX, linesY]
   } finally {
     src.delete()

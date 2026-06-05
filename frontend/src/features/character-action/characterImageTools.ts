@@ -1,4 +1,4 @@
-import { removeBackground } from '../../api'
+import { removeBackgroundIfNeeded } from '../../lib/media-tools/matteClient'
 import {
   DEFAULT_CANVAS_SIZE,
   ACTION_NAMES,
@@ -42,6 +42,15 @@ export function downloadBlob(blob: Blob, filename: string) {
 export function canvasToBlob(canvas: HTMLCanvasElement): Promise<Blob> {
   return new Promise((resolve, reject) => {
     canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error('PNG export failed'))), 'image/png')
+  })
+}
+
+export function blobToDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result || ''))
+    reader.onerror = () => reject(reader.error || new Error('Blob read failed'))
+    reader.readAsDataURL(blob)
   })
 }
 
@@ -97,38 +106,13 @@ export async function loadImageWithUrl(blob: Blob, name: string): Promise<{ imag
   })
 }
 
-export async function hasUsefulAlpha(blob: Blob): Promise<boolean> {
-  const image = await loadImageFromBlob(blob)
-  const sample = document.createElement('canvas')
-  const maxSide = 128
-  const scale = Math.min(1, maxSide / Math.max(image.naturalWidth, image.naturalHeight))
-  sample.width = Math.max(1, Math.round(image.naturalWidth * scale))
-  sample.height = Math.max(1, Math.round(image.naturalHeight * scale))
-  const ctx = sample.getContext('2d', { willReadFrequently: true })
-  if (!ctx) return false
-  ctx.drawImage(image, 0, 0, sample.width, sample.height)
-  const data = ctx.getImageData(0, 0, sample.width, sample.height).data
-  let transparentPixels = 0
-  for (let i = 3; i < data.length; i += 4) {
-    if (data[i] < 245) transparentPixels += 1
-  }
-  return transparentPixels / (data.length / 4) > 0.01
-}
-
 async function maybeMatteFile(file: File, autoMatte: boolean): Promise<LoadedBitmap> {
   let blob: Blob = file
   let matteStatus: MatteStatus = 'original'
   if (autoMatte) {
-    try {
-      const alreadyTransparent = await hasUsefulAlpha(file)
-      if (!alreadyTransparent) {
-        blob = await removeBackground(file)
-        matteStatus = 'processed'
-      }
-    } catch {
-      blob = file
-      matteStatus = 'failed'
-    }
+    const result = await removeBackgroundIfNeeded(file, true)
+    blob = result.blob
+    matteStatus = result.status === 'processed' ? 'processed' : result.status === 'failed' ? 'failed' : 'original'
   }
   const { image, url } = await loadImageWithUrl(blob, file.name)
   return { image, url, blob, matteStatus }

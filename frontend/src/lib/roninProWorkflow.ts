@@ -876,7 +876,9 @@ export function computeWorkflowRunStrategy(
     const rawIdx = Math.round(head.params.imageIndex ?? 1)
     const imageIndex1 = Math.min(Math.max(1, rawIdx), Math.max(1, fileCount))
     const steps: WorkflowNode[] = processors.map((g) => {
-      const { x: _x, y: _y, ...rest } = g
+      const { x, y, ...rest } = g
+      void x
+      void y
       return rest
     })
     plans.push({ fileIndex0: imageIndex1 - 1, steps })

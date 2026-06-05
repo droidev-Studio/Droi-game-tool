@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useLanguage } from '../../i18n/context'
 
-const HANDLE_SIZE = 12
+const MIN_CROP_SIZE = 200
 type CropHandle = 'n' | 's' | 'e' | 'w' | 'ne' | 'nw' | 'se' | 'sw' | 'move' | null
 
 interface Props {
@@ -13,6 +13,35 @@ interface Props {
   pickingColor?: boolean
 }
 
+type DragStart = {
+  x: number
+  y: number
+  left: number
+  top: number
+  right: number
+  bottom: number
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, value))
+}
+
+function cursorForHandle(handle: CropHandle, pickingColor?: boolean) {
+  if (pickingColor) return 'crosshair'
+  const map: Record<string, string> = {
+    move: 'grab',
+    n: 'ns-resize',
+    s: 'ns-resize',
+    e: 'ew-resize',
+    w: 'ew-resize',
+    ne: 'nesw-resize',
+    sw: 'nesw-resize',
+    nw: 'nwse-resize',
+    se: 'nwse-resize',
+  }
+  return (handle && map[handle]) || 'default'
+}
+
 export default function ImageCropEditor({
   imageUrl,
   imageSize,
@@ -22,194 +51,190 @@ export default function ImageCropEditor({
   pickingColor,
 }: Props) {
   const { t } = useLanguage()
-  const canvasRef = useRef<HTMLCanvasElement>(null)
+  const frameRef = useRef<HTMLDivElement>(null)
+  const imageRef = useRef<HTMLImageElement>(null)
   const [dragging, setDragging] = useState<CropHandle>(null)
-  const [startPos, setStartPos] = useState<{
-    x: number
-    y: number
-    left: number
-    top: number
-    right: number
-    bottom: number
-  } | null>(null)
-  const [hoverHandle, setHoverHandle] = useState<CropHandle>(null)
+  const [dragStart, setDragStart] = useState<DragStart | null>(null)
 
-  const hitTest = (vx: number, vy: number): CropHandle => {
-    const { left, top, right, bottom } = cropRegion
-    const r = imageSize.w - left - right
-    const b = imageSize.h - top - bottom
-    const hs = HANDLE_SIZE
-    if (vx >= left - hs && vx <= left + hs && vy >= top - hs && vy <= top + hs) return 'nw'
-    if (vx >= left + r - hs && vx <= left + r + hs && vy >= top - hs && vy <= top + hs) return 'ne'
-    if (vx >= left - hs && vx <= left + hs && vy >= top + b - hs && vy <= top + b + hs) return 'sw'
-    if (vx >= left + r - hs && vx <= left + r + hs && vy >= top + b - hs && vy <= top + b + hs) return 'se'
-    if (vx >= left - hs && vx <= left + hs && vy >= top && vy <= top + b) return 'w'
-    if (vx >= left + r - hs && vx <= left + r + hs && vy >= top && vy <= top + b) return 'e'
-    if (vx >= left && vx <= left + r && vy >= top - hs && vy <= top + hs) return 'n'
-    if (vx >= left && vx <= left + r && vy >= top + b - hs && vy <= top + b + hs) return 's'
-    if (vx >= left && vx <= left + r && vy >= top && vy <= top + b) return 'move'
-    return null
-  }
+  const minW = Math.min(MIN_CROP_SIZE, imageSize.w)
+  const minH = Math.min(MIN_CROP_SIZE, imageSize.h)
+  const cropLeft = cropRegion.left
+  const cropTop = cropRegion.top
+  const cropWidth = imageSize.w - cropRegion.left - cropRegion.right
+  const cropHeight = imageSize.h - cropRegion.top - cropRegion.bottom
 
   const toImageCoords = (clientX: number, clientY: number) => {
-    const canvas = canvasRef.current
-    if (!canvas) return { vx: 0, vy: 0 }
-    const rect = canvas.getBoundingClientRect()
-    const scaleX = imageSize.w / rect.width
-    const scaleY = imageSize.h / rect.height
+    const rect = frameRef.current?.getBoundingClientRect()
+    if (!rect) return { x: 0, y: 0 }
     return {
-      vx: Math.round((clientX - rect.left) * scaleX),
-      vy: Math.round((clientY - rect.top) * scaleY),
+      x: clamp(Math.round(((clientX - rect.left) / rect.width) * imageSize.w), 0, imageSize.w),
+      y: clamp(Math.round(((clientY - rect.top) / rect.height) * imageSize.h), 0, imageSize.h),
     }
   }
 
-  const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    const { vx, vy } = toImageCoords(e.clientX, e.clientY)
-    if (pickingColor && onPickColor) {
-      const canvas = canvasRef.current
-      if (!canvas) return
-      const rect = canvas.getBoundingClientRect()
-      const scaleX = imageSize.w / rect.width
-      const scaleY = imageSize.h / rect.height
-      const x = Math.floor((e.clientX - rect.left) * scaleX)
-      const y = Math.floor((e.clientY - rect.top) * scaleY)
-      const ctx = canvas.getContext('2d')
-      if (ctx) {
-        const [r, g, b] = ctx.getImageData(x, y, 1, 1).data
-        onPickColor(r, g, b)
-      }
-      return
-    }
-    const handle = hitTest(vx, vy)
-    setDragging(handle)
-    setStartPos({ x: vx, y: vy, ...cropRegion })
-  }
+  const patchCrop = (handle: CropHandle, point: { x: number; y: number }, start: DragStart) => {
+    const dx = point.x - start.x
+    const dy = point.y - start.y
+    let { left, top, right, bottom } = start
 
-  const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    const coords = toImageCoords(e.clientX, e.clientY)
-    if (!dragging || !startPos) {
-      setHoverHandle(pickingColor ? null : hitTest(coords.vx, coords.vy))
-      return
-    }
-    const dx = coords.vx - startPos.x
-    const dy = coords.vy - startPos.y
-    let { left, top, right, bottom } = startPos
-    if (dragging === 'move') {
-      const w = imageSize.w - startPos.left - startPos.right
-      const h = imageSize.h - startPos.top - startPos.bottom
-      left = Math.max(0, Math.min(imageSize.w - w - 1, startPos.left + dx))
-      top = Math.max(0, Math.min(imageSize.h - h - 1, startPos.top + dy))
-      right = imageSize.w - left - w
-      bottom = imageSize.h - top - h
+    if (handle === 'move') {
+      const width = imageSize.w - start.left - start.right
+      const height = imageSize.h - start.top - start.bottom
+      left = clamp(start.left + dx, 0, imageSize.w - width)
+      top = clamp(start.top + dy, 0, imageSize.h - height)
+      right = imageSize.w - left - width
+      bottom = imageSize.h - top - height
     } else {
-      const minW = 1
-      const minH = 1
-      if (dragging.includes('w'))
-        left = Math.max(0, Math.min(imageSize.w - startPos.right - minW, startPos.left + dx))
-      if (dragging.includes('e'))
-        right = Math.max(0, Math.min(imageSize.w - startPos.left - minW, startPos.right - dx))
-      if (dragging.includes('n'))
-        top = Math.max(0, Math.min(imageSize.h - startPos.bottom - minH, startPos.top + dy))
-      if (dragging.includes('s'))
-        bottom = Math.max(0, Math.min(imageSize.h - startPos.top - minH, startPos.bottom - dy))
+      if (handle?.includes('w')) {
+        left = clamp(start.left + dx, 0, imageSize.w - start.right - minW)
+      }
+      if (handle?.includes('e')) {
+        right = clamp(start.right - dx, 0, imageSize.w - start.left - minW)
+      }
+      if (handle?.includes('n')) {
+        top = clamp(start.top + dy, 0, imageSize.h - start.bottom - minH)
+      }
+      if (handle?.includes('s')) {
+        bottom = clamp(start.bottom - dy, 0, imageSize.h - start.top - minH)
+      }
     }
+
     onChange({ left, top, right, bottom })
   }
 
-  const handleMouseUp = () => {
-    setDragging(null)
-    setStartPos(null)
+  const beginDrag = (event: React.PointerEvent, handle: CropHandle) => {
+    if (pickingColor) return
+    event.preventDefault()
+    event.stopPropagation()
+    const point = toImageCoords(event.clientX, event.clientY)
+    setDragging(handle)
+    setDragStart({ x: point.x, y: point.y, ...cropRegion })
+    event.currentTarget.setPointerCapture(event.pointerId)
   }
 
-  const getCursor = () => {
-    if (pickingColor) return 'crosshair'
-    if (dragging) return 'grabbing'
-    const h = hoverHandle ?? null
-    const map: Record<string, string> = {
-      move: 'grab',
-      n: 'n-resize',
-      s: 's-resize',
-      e: 'e-resize',
-      w: 'w-resize',
-      ne: 'ne-resize',
-      nw: 'nw-resize',
-      se: 'se-resize',
-      sw: 'sw-resize',
+  const pickColor = (clientX: number, clientY: number) => {
+    if (!onPickColor) return
+    const point = toImageCoords(clientX, clientY)
+    const img = imageRef.current
+    if (!img) return
+    const canvas = document.createElement('canvas')
+    canvas.width = imageSize.w
+    canvas.height = imageSize.h
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+    ctx.drawImage(img, 0, 0, imageSize.w, imageSize.h)
+    const sampleX = clamp(point.x, 0, Math.max(0, imageSize.w - 1))
+    const sampleY = clamp(point.y, 0, Math.max(0, imageSize.h - 1))
+    const [r, g, b] = ctx.getImageData(sampleX, sampleY, 1, 1).data
+    onPickColor(r, g, b)
+  }
+
+  const onCropPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (pickingColor) {
+      event.preventDefault()
+      event.stopPropagation()
+      pickColor(event.clientX, event.clientY)
+      return
     }
-    return (h && map[h]) ?? 'crosshair'
+    beginDrag(event, 'move')
+  }
+
+  const onFramePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!pickingColor) return
+    event.preventDefault()
+    pickColor(event.clientX, event.clientY)
+  }
+
+  const onPointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!dragging || !dragStart) return
+    event.preventDefault()
+    patchCrop(dragging, toImageCoords(event.clientX, event.clientY), dragStart)
+  }
+
+  const endDrag = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (dragging) {
+      event.currentTarget.releasePointerCapture?.(event.pointerId)
+    }
+    setDragging(null)
+    setDragStart(null)
   }
 
   useEffect(() => {
-    const canvas = canvasRef.current
-    if (!canvas || !imageUrl) return
-    const img = new Image()
-    img.onload = () => {
-      const ctx = canvas.getContext('2d')
-      if (!ctx) return
-      canvas.width = imageSize.w
-      canvas.height = imageSize.h
-      ctx.drawImage(img, 0, 0)
-      const { left, top, right, bottom } = cropRegion
-      const w = imageSize.w - left - right
-      const h = imageSize.h - top - bottom
-      ctx.fillStyle = 'rgba(0,0,0,0.55)'
-      if (left > 0) ctx.fillRect(0, 0, left, imageSize.h)
-      if (right > 0) ctx.fillRect(imageSize.w - right, 0, right, imageSize.h)
-      if (top > 0) ctx.fillRect(left, 0, w, top)
-      if (bottom > 0) ctx.fillRect(left, imageSize.h - bottom, w, bottom)
-      ctx.strokeStyle = '#b55233'
-      ctx.lineWidth = 2
-      ctx.strokeRect(left, top, w, h)
-      ctx.fillStyle = '#b55233'
-      ;[
-        [left, top],
-        [left + w, top],
-        [left + w, top + h],
-        [left, top + h],
-        [left + w / 2, top],
-        [left + w / 2, top + h],
-        [left, top + h / 2],
-        [left + w, top + h / 2],
-      ].forEach(([x, y]) => {
-        ctx.fillRect(x - 4, y - 4, 8, 8)
-      })
-    }
-    img.onerror = () => {
-      const ctx = canvasRef.current?.getContext('2d')
-      if (ctx) {
-        ctx.fillStyle = '#d4c8b8'
-        ctx.fillRect(0, 0, imageSize.w, imageSize.h)
-        ctx.fillStyle = '#6b5d4d'
-        ctx.font = '14px sans-serif'
-        ctx.textAlign = 'center'
-        ctx.fillText(t('errImageLoad'), imageSize.w / 2, imageSize.h / 2)
-      }
-    }
-    img.src = imageUrl
-  }, [imageUrl, cropRegion, imageSize, t])
+    if (!imageSize.w || !imageSize.h) return
+    const invalid =
+      cropRegion.left < 0 ||
+      cropRegion.top < 0 ||
+      cropRegion.right < 0 ||
+      cropRegion.bottom < 0 ||
+      imageSize.w - cropRegion.left - cropRegion.right < minW ||
+      imageSize.h - cropRegion.top - cropRegion.bottom < minH
+    if (!invalid) return
+    onChange({
+      left: 0,
+      top: 0,
+      right: Math.max(0, imageSize.w - minW),
+      bottom: Math.max(0, imageSize.h - minH),
+    })
+  }, [cropRegion, imageSize.h, imageSize.w, minH, minW, onChange])
 
   if (!imageUrl) return null
 
   return (
-    <div
-      style={{
-        overflow: 'auto',
-        maxHeight: 400,
-        border: '1px solid #9a8b78',
-        borderRadius: 8,
-        background: 'repeating-conic-gradient(#c9bfb0 0% 25%, #e4dbcf 0% 50%) 50% / 16px 16px',
-      }}
-    >
-      <canvas
-        ref={canvasRef}
-        width={imageSize.w}
-        height={imageSize.h}
-        onMouseDown={handleMouseDown}
-        onMouseMove={handleMouseMove}
-        onMouseUp={handleMouseUp}
-        onMouseLeave={handleMouseUp}
-        style={{ maxWidth: '100%', cursor: getCursor(), display: 'block', imageRendering: 'pixelated' }}
-      />
+    <div className="image-crop-editor">
+      <div
+        ref={frameRef}
+        className={`image-crop-editor-frame ${pickingColor ? 'is-picking' : ''}`}
+        style={{
+          aspectRatio: `${imageSize.w} / ${imageSize.h}`,
+          maxWidth: `min(100%, ${Math.round((imageSize.w / Math.max(1, imageSize.h)) * 430)}px)`,
+        }}
+        onPointerDown={onFramePointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={endDrag}
+        onPointerCancel={endDrag}
+      >
+        <img
+          ref={imageRef}
+          src={imageUrl}
+          alt={t('imgOriginalPreview')}
+          draggable={false}
+          onError={() => {
+            // Keep the editor mounted so numeric crop controls still work.
+          }}
+        />
+        <div className="image-crop-editor-shade" />
+        {pickingColor && <div className="image-crop-picker-badge">吸管模式 / Eyedropper</div>}
+        <div
+          className="image-crop-editor-box"
+          style={{
+            left: `${(cropLeft / imageSize.w) * 100}%`,
+            top: `${(cropTop / imageSize.h) * 100}%`,
+            width: `${(cropWidth / imageSize.w) * 100}%`,
+            height: `${(cropHeight / imageSize.h) * 100}%`,
+            cursor: cursorForHandle(dragging || 'move', pickingColor),
+          }}
+          onPointerDown={onCropPointerDown}
+        >
+          <span className="image-crop-editor-size">
+            {cropWidth} x {cropHeight}px
+          </span>
+          {(['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'] as const).map((handle) => (
+            <button
+              key={handle}
+              type="button"
+              className={`image-crop-handle is-${handle}`}
+              aria-label={`Resize crop ${handle}`}
+              style={{ cursor: cursorForHandle(handle, pickingColor) }}
+              onPointerDown={(event) => beginDrag(event, handle)}
+            />
+          ))}
+        </div>
+      </div>
+      <div className="image-crop-editor-hint">
+        {pickingColor && <strong>吸管已开启：点击图片中的背景颜色进行采样。</strong>}
+        <span>拖动裁剪框移动区域，拖动四边或四角调整范围。</span>
+        <span>Drag the box to move. Drag edges or corners to resize.</span>
+      </div>
     </div>
   )
 }
