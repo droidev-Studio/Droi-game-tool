@@ -81,7 +81,7 @@ export default defineConfig({
   worker: {
     format: 'es',
   },
-  base: '/',
+  base: process.env.GITHUB_ACTIONS ? '/Droi-game-tool/' : '/',
   server: {
     port: 5173,
     proxy: {
